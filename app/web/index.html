@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Khata Voice</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f6fa; --card: #ffffff; --ink: #1c2430; --muted: #667085; --line: #e2e6ee;
+    --brand: #00a0e3; --brand-dark: #002e6e; --brand-soft: #e6f6fd;
+    --ok: #12805c; --ok-soft: #e7f6ef; --warn: #b54708; --warn-soft: #fef3e6; --err: #c4320a; --err-soft: #fdeceb;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  button, input, select { font: inherit; }
+  header { background: var(--brand-dark); color: #fff; padding: 10px 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  header .logo { font-weight: 700; font-size: 18px; letter-spacing: .2px; }
+  header .logo span { color: var(--brand); }
+  header select { background: #fff; color: var(--ink); border: 0; border-radius: 8px; padding: 6px 10px; max-width: 260px; }
+  header .spacer { flex: 1; }
+  header .chip { font-size: 12px; padding: 3px 10px; border-radius: 12px; background: rgba(255,255,255,.15); }
+  header button { background: rgba(255,255,255,.15); color: #fff; border: 0; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding: 16px; max-width: 1280px; margin: 0 auto; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; padding: 12px; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .card + .card { margin-top: 16px; }
+  h2 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+  h2 .count { font-weight: 400; color: var(--muted); font-size: 13px; }
+  .muted { color: var(--muted); font-size: 13px; }
+
+  /* ---------- voice */
+  .voice { text-align: center; padding-top: 22px; }
+  .mic-wrap { position: relative; width: 150px; height: 150px; margin: 6px auto 10px; }
+  .ring { position: absolute; inset: 0; border-radius: 50%; background: var(--brand-soft); transform: scale(1); transition: transform .08s linear; }
+  .mic { position: absolute; inset: 15px; border-radius: 50%; border: 0; background: var(--brand); color: #fff; cursor: pointer;
+         display: grid; place-items: center; box-shadow: 0 6px 18px rgba(0,160,227,.35); user-select: none; touch-action: none; }
+  .mic svg { width: 52px; height: 52px; }
+  .mic.listening { background: #e5484d; box-shadow: 0 6px 18px rgba(229,72,77,.35); }
+  .mic.busy { background: #98a2b3; box-shadow: none; cursor: progress; }
+  .state { font-weight: 600; font-size: 16px; min-height: 24px; }
+  .state.listening { color: #e5484d; } .state.thinking { color: var(--brand-dark); } .state.speaking { color: var(--ok); }
+  .tips { margin: 6px 0 0; }
+  .tips button { background: var(--bg); border: 1px solid var(--line); border-radius: 16px; padding: 4px 10px; margin: 3px; font-size: 13px; cursor: pointer; color: var(--ink); }
+  .typebox { display: flex; gap: 8px; margin-top: 14px; }
+  .typebox input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; }
+  .btn { border: 0; border-radius: 10px; padding: 9px 14px; cursor: pointer; font-weight: 600; }
+  .btn.primary { background: var(--brand); color: #fff; }
+  .btn.ok { background: var(--ok); color: #fff; }
+  .btn.danger { background: #e5484d; color: #fff; margin-top: 10px; }
+  .note { align-self: center; font-size: 12px; color: var(--muted); background: var(--bg); border-radius: 10px; padding: 3px 10px; }
+  .btn.ghost { background: #fff; border: 1px solid var(--line); color: var(--ink); font-weight: 500; }
+  .btn.small { padding: 5px 10px; font-size: 13px; }
+  .btn:disabled { opacity: .5; cursor: default; }
+
+  /* ---------- conversation */
+  .chat { display: flex; flex-direction: column; gap: 10px; max-height: 460px; overflow-y: auto; padding: 2px; }
+  .bubble { max-width: 85%; padding: 9px 12px; border-radius: 14px; }
+  .bubble.me { align-self: flex-end; background: var(--brand-soft); border-bottom-right-radius: 4px; }
+  .bubble.bot { align-self: flex-start; background: #f2f4f7; border-bottom-left-radius: 4px; }
+  .bubble .meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .bubble .replay { background: none; border: 0; color: var(--brand); cursor: pointer; font-size: 12px; padding: 0; margin-left: 6px; }
+  .pending { align-self: stretch; border: 1px solid #f5c48a; background: var(--warn-soft); border-radius: 12px; padding: 10px 12px; }
+  .pending ul { margin: 4px 0 8px; padding-left: 18px; }
+  .pending .row { display: flex; gap: 8px; }
+  .done { align-self: stretch; border: 1px solid #a6dcc3; background: var(--ok-soft); border-radius: 12px; padding: 8px 12px; color: var(--ok); font-weight: 600; }
+  .empty { color: var(--muted); text-align: center; padding: 18px 0; font-size: 14px; }
+
+  /* ---------- shop side */
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .stat { background: var(--bg); border-radius: 10px; padding: 10px; }
+  .stat b { display: block; font-size: 20px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tabs button { border: 1px solid var(--line); background: #fff; border-radius: 18px; padding: 5px 12px; cursor: pointer; font-size: 13px; color: var(--ink); }
+  .tabs button.on { background: var(--brand-dark); color: #fff; border-color: var(--brand-dark); }
+  .list { display: flex; flex-direction: column; }
+  .item { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 1px solid var(--line); }
+  .item:last-child { border-bottom: 0; }
+  .item .who { flex: 1; min-width: 0; }
+  .item .who b { display: block; font-weight: 600; }
+  .item .amt { font-weight: 700; white-space: nowrap; }
+  .amt.owe { color: var(--err); } .amt.adv { color: var(--ok); } .amt.zero { color: var(--muted); font-weight: 500; }
+  .item.click { cursor: pointer; } .item.click:hover { background: #fafbfc; }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: var(--err-soft); color: var(--err); margin-left: 4px; font-weight: 600; }
+  .badge.today { background: var(--warn-soft); color: var(--warn); }
+  .detail { background: var(--bg); border-radius: 10px; padding: 10px 12px; margin: 4px 0 8px; font-size: 13px; }
+  .detail table { width: 100%; border-collapse: collapse; }
+  .detail td { padding: 4px 2px; border-bottom: 1px solid var(--line); }
+  .detail tr:last-child td { border-bottom: 0; }
+  .form { display: grid; grid-template-columns: 1fr 120px; gap: 8px; }
+  .form input, .form select { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; width: 100%; min-width: 0; background: #fff; }
+  .form .full { grid-column: 1 / -1; }
+  .feed { max-height: 220px; overflow-y: auto; }
+  .ann { border-left: 3px solid var(--ok); background: #fafbfc; padding: 6px 10px; margin: 6px 0; border-radius: 0 8px 8px 0; font-size: 14px; }
+  .ann.upi_unmatched { border-left-color: var(--warn); }
+  .ann small { color: var(--muted); display: block; font-size: 11px; }
+  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
+  .toast.show { opacity: .95; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Khata<span>Voice</span></div>
+  <select id="shop" aria-label="Shop"></select>
+  <button id="seed" title="Create the demo shop with sample customers">+ Demo shop</button>
+  <div class="spacer"></div>
+  <label class="chip"><input type="checkbox" id="speakOn" checked> Awaaz on</label>
+  <span class="chip" id="live">○ Live off</span>
+</header>
+
+<div class="layout">
+  <!-- ======================= left: voice + conversation -->
+  <section>
+    <div class="card voice">
+      <div class="mic-wrap">
+        <div class="ring" id="ring"></div>
+        <button class="mic" id="mic" aria-label="Start conversation">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a1 1 0 1 1 2 0 7 7 0 0 1-6 6.93V21h2a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2h2v-2.07A7 7 0 0 1 5 12a1 1 0 1 1 2 0 5 5 0 0 0 10 0Z"/></svg>
+        </button>
+      </div>
+      <div class="state" id="state">Mic dabaiye aur baat shuru kijiye</div>
+      <div class="muted" id="hint">Ek baar dabaiye: baat chalti rahegi jab tak aap band na karein.</div>
+      <button class="btn danger" id="endConv" hidden>■ Baat khatam</button>
+      <div class="tips" id="tips"></div>
+      <div class="typebox">
+        <input id="text" placeholder="Ya yahan likhiye… e.g. Ramesh Patil ka kitna baaki hai?" autocomplete="off">
+        <button class="btn primary" id="send">Bhejo</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Baatchit <span class="count" id="session"></span></h2>
+      <div class="chat" id="chat"><div class="empty">Boliye ya likhiye. Jawab yahan aur awaaz mein aayega.</div></div>
+    </div>
+  </section>
+
+  <!-- ======================= right: shop -->
+  <section>
+    <div class="card">
+      <h2>Aaj ka hisaab <span class="count" id="today"></span></h2>
+      <div class="stats">
+        <div class="stat"><b id="sGiven">–</b><span>Udhaar diya</span></div>
+        <div class="stat"><b id="sGot">–</b><span>Wapas aaya</span></div>
+        <div class="stat"><b id="sOut">–</b><span>Kul baaki</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="tabs" id="tabs">
+        <button data-t="dues" class="on">Aaj ki vasooli</button>
+        <button data-t="customers">Saare customers</button>
+        <button data-t="pay">UPI payment</button>
+      </div>
+
+      <div data-p="dues">
+        <div class="list" id="dues"></div>
+        <div style="margin-top:10px"><button class="btn ghost small" id="remindAll">Sabko reminder bhejo</button></div>
+      </div>
+
+      <div data-p="customers" hidden>
+        <div class="list" id="customers"></div>
+      </div>
+
+      <div data-p="pay" hidden>
+        <p class="muted" style="margin-top:0">Simulate a customer paying the shop by UPI. A known UPI ID settles that customer's udhaar on its own; an unknown one asks "kiska hai?".</p>
+        <div class="form">
+          <select id="payVpa"></select>
+          <input id="payAmt" type="number" min="1" value="300" aria-label="Amount in rupees">
+          <input id="payVpaOther" class="full" placeholder="…or type any UPI ID, e.g. sunita99@ybl">
+          <button class="btn primary full" id="payBtn">Customer ne pay kiya</button>
+        </div>
+        <h2 style="margin-top:16px">Kiska hai? <span class="count" id="unCount"></span></h2>
+        <div class="list" id="unmatched"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Announcements <span class="count">(Soundbox)</span></h2>
+      <div class="feed" id="feed"><div class="empty">UPI payments and alerts appear and are spoken here.</div></div>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const S = { shop: null, session: "app-" + Math.random().toString(36).slice(2, 8), customers: [], busy: false, ws: null, openCustomer: null };
+const api = (p) => `/api/merchants/${S.shop}${p}`;
+const TIPS = ["Ramesh Patil ka kitna baaki hai?", "Mohan Lal ko 120 ka saamaan, kal tak", "Sunita Devi ne 200 cash diye",
+              "Aaj kiska paisa aana hai?", "Sabko reminder bhej do", "galat hai, undo karo"];
+
+async function call(path, opts = {}) {
+  const r = await fetch(path, opts);
+  const type = r.headers.get("content-type") || "";
+  const data = type.includes("json") ? await r.json() : await r.blob();
+  if (!r.ok) throw new Error((data && data.detail) ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : r.status);
+  return data;
+}
+const post = (path, body) => call(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
+
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 3500); }
+
+// ======================================================= audio out (one clip at a time)
+let playQueue = Promise.resolve(), current = null;
+function play(src) {
+  playQueue = playQueue.then(() => new Promise((done) => {
+    const a = new Audio(src); current = a;
+    const end = () => { if (current === a) current = null; done(); };
+    a.onended = end; a.onerror = end; a.play().catch(end);
+  }));
+  return playQueue;
+}
+function stopPlayback() { if (current) { current.pause(); current.onended && current.onended(); } current = null; playQueue = Promise.resolve(); }
+async function audioFor(text, b64) {
+  if (b64) return "data:audio/wav;base64," + b64;
+  try { return URL.createObjectURL(await post(api("/tts"), { text })); } catch { return null; }
+}
+// Speak, pausing the mic so the agent never hears itself. Resolves when done speaking.
+async function say(text, b64) {
+  if (!$("speakOn").checked || !text) return;
+  const resume = conv.active && conv.phase === "listening";
+  if (resume) pauseListening();
+  const src = await audioFor(text, b64);
+  setState("speaking");
+  if (src) await play(src);
+  else if (window.speechSynthesis) await new Promise((done) => {
+    const u = new SpeechSynthesisUtterance(text); u.lang = "hi-IN"; u.onend = done; u.onerror = done; speechSynthesis.speak(u);
+  });
+  if (resume && conv.active && conv.phase !== "thinking") startListening();
+  else if (!conv.active && !S.busy) setState("idle");
+}
+
+// ======================================================= state line
+function setState(s, text) {
+  const map = {
+    idle: "Mic dabaiye aur baat shuru kijiye",
+    listening: "Boliye… main sun raha hoon",
+    hearing: "Sun raha hoon…",
+    thinking: "Soch raha hoon…",
+    speaking: "Bol raha hoon…",
+  };
+  $("state").className = "state " + (s === "hearing" ? "listening" : s);
+  $("state").textContent = text || map[s];
+  $("mic").classList.toggle("listening", s === "listening" || s === "hearing");
+  $("mic").classList.toggle("busy", s === "thinking");
+  $("hint").textContent = conv.active
+    ? (s === "speaking" ? "Beech mein bolna ho to mic dabaiye." : "Rukte hi apne aap bhej dunga. Khatam: \"bas\" boliye ya laal button.")
+    : "Ek baar dabaiye: baat chalti rahegi jab tak aap band na karein.";
+}
+
+// ======================================================= hands-free conversation
+// listen -> (speech, then 1.2 s silence) -> send -> reply spoken -> listen again ... until ended.
+const VAD = { tick: 50, minSpeech: 150, silence: 1200, maxUtterance: 20000, restartIdle: 8000, giveUp: 60000 };
+const conv = { active: false, phase: "idle", stream: null, ctx: null, an: null, buf: null, loop: 0,
+               mr: null, noise: 0.01, heard: false, speechMs: 0,
+               lastVoice: 0, listenStart: 0, speechStart: 0, idleSince: 0 };
+
+async function startConversation() {
+  if (conv.active) return;
+  if (!S.shop) return toast("Pehle shop chuniye ya demo shop banaiye.");
+  try {
+    conv.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch (e) { return toast("Mic ki permission nahi mili: " + e.message); }
+  conv.ctx = new AudioContext();
+  conv.an = conv.ctx.createAnalyser(); conv.an.fftSize = 1024;
+  conv.ctx.createMediaStreamSource(conv.stream).connect(conv.an);
+  conv.buf = new Float32Array(conv.an.fftSize);
+  conv.active = true; conv.idleSince = Date.now();
+  $("endConv").hidden = false;
+  conv.loop = setInterval(vadTick, VAD.tick);
+  addNote("Baat shuru. Boliye…");
+  startListening();
+}
+
+function endConversation(note) {
+  if (!conv.active) return;
+  conv.active = false;
+  pauseListening();
+  clearInterval(conv.loop);
+  if (conv.stream) conv.stream.getTracks().forEach((t) => t.stop());
+  if (conv.ctx) conv.ctx.close();
+  conv.stream = conv.ctx = conv.an = null;
+  conv.phase = "idle";
+  $("endConv").hidden = true;
+  $("ring").style.transform = "scale(1)";
+  addNote(note || "Baat khatam.");
+  if (!S.busy) setState("idle");
+}
+
+function startListening() {
+  if (!conv.active) return;
+  pauseListening();
+  const mr = new MediaRecorder(conv.stream);
+  mr.chunks = []; mr.discard = false;
+  mr.ondataavailable = (e) => e.data.size && mr.chunks.push(e.data);
+  mr.onstop = () => onUtterance(mr);
+  mr.start();
+  conv.mr = mr;
+  conv.phase = "listening"; conv.heard = false; conv.speechMs = 0;
+  conv.listenStart = Date.now();
+  setState("listening");
+}
+
+function pauseListening() {  // stop the recorder and throw the audio away
+  if (conv.mr && conv.mr.state === "recording") { conv.mr.discard = true; conv.mr.stop(); }
+  conv.mr = null;
+  if (conv.phase === "listening") conv.phase = "idle";
+}
+
+function finishUtterance() {  // send what we have
+  if (!conv.mr || conv.mr.state !== "recording") return;
+  conv.phase = "thinking";
+  conv.mr.stop();
+}
+
+function vadTick() {
+  if (!conv.an) return;
+  conv.an.getFloatTimeDomainData(conv.buf);
+  let sum = 0; for (const v of conv.buf) sum += v * v;
+  const rms = Math.sqrt(sum / conv.buf.length);
+  const now = Date.now();
+  $("ring").style.transform = `scale(${1 + Math.min(rms * 6, 1) * 0.35})`;
+  if (conv.phase !== "listening") return;
+
+  const threshold = Math.max(0.012, conv.noise * 3);
+  if (rms > threshold) {
+    conv.speechMs += VAD.tick; conv.lastVoice = now;
+    if (!conv.heard && conv.speechMs >= VAD.minSpeech) {
+      conv.heard = true; conv.speechStart = now; conv.idleSince = now; setState("hearing");
+    }
+  } else {
+    if (!conv.heard) conv.speechMs = Math.max(0, conv.speechMs - VAD.tick);
+    conv.noise = conv.noise * 0.95 + rms * 0.05;  // learn the shop's background noise
+  }
+
+  if (conv.heard && (now - conv.lastVoice > VAD.silence || now - conv.speechStart > VAD.maxUtterance)) {
+    finishUtterance();
+  } else if (!conv.heard && now - conv.idleSince > VAD.giveUp) {
+    endConversation("Kaafi der koi awaaz nahi aayi, baat band kar di. Phir se mic dabaiye.");
+  } else if (!conv.heard && now - conv.listenStart > VAD.restartIdle) {
+    startListening();  // keep clips short while waiting in silence
+  }
+}
+
+async function onUtterance(mr) {
+  if (mr.discard) return;
+  const blob = new Blob(mr.chunks, { type: mr.mimeType || "audio/webm" });
+  if (blob.size < 1500) { if (conv.active) startListening(); return; }
+  const form = new FormData();
+  form.append("audio", blob, "voice.webm");
+  form.append("session_id", S.session);
+  await turn(async () => {
+    const r = await call(api("/agent/voice"), { method: "POST", body: form });
+    addBubble("me", r.transcript || "(kuch sunai nahi diya)", "🎙 aapki awaaz", URL.createObjectURL(blob));
+    return r;
+  });
+}
+
+// mic: start the conversation; during it, tap = "I'm done talking" or interrupt the agent
+function micTap() {
+  if (!conv.active) return startConversation();
+  if (conv.phase === "thinking") return;
+  if (current || (window.speechSynthesis && speechSynthesis.speaking)) {  // interrupt the agent
+    stopPlayback(); if (window.speechSynthesis) speechSynthesis.cancel();
+    return startListening();
+  }
+  if (conv.phase === "listening" && conv.heard) return finishUtterance();
+  if (conv.phase !== "listening") startListening();
+}
+$("mic").addEventListener("click", micTap);
+$("endConv").addEventListener("click", () => { stopPlayback(); endConversation(); });
+document.addEventListener("keydown", (e) => {
+  if (e.code === "Space" && !e.repeat && !["INPUT", "SELECT", "BUTTON"].includes(document.activeElement.tagName)) { e.preventDefault(); micTap(); }
+  if (e.code === "Escape" && conv.active) endConversation();
+});
+
+// ======================================================= agent turns
+async function sendText(text) {
+  text = text.trim(); if (!text) return;
+  if (!S.shop) return toast("Pehle shop chuniye ya demo shop banaiye.");
+  $("text").value = "";
+  if (conv.active) { pauseListening(); conv.phase = "thinking"; }
+  addBubble("me", text);
+  await turn(() => post(api("/agent/message"), { text, session_id: S.session, speak: $("speakOn").checked }));
+}
+
+async function turn(fn) {
+  if (S.busy) return;
+  S.busy = true; setState("thinking"); $("send").disabled = true;
+  let r = null;
+  try {
+    r = await fn();
+    addBubble("bot", r.reply, `${(r.latency_ms / 1000).toFixed(1)}s`, r.audio_base64 ? "data:audio/wav;base64," + r.audio_base64 : null);
+    if (r.pending && r.pending.length && !["committed", "ended"].includes(r.outcome)) addPending(r.pending, r.outcome);
+    if (r.committed && r.committed.length) addDone(r.committed);
+    if (["committed", "answered", "cancelled", "ended"].includes(r.outcome)) refresh();
+  } catch (e) {
+    addBubble("bot", "⚠ " + e.message);
+  } finally {
+    S.busy = false; $("send").disabled = false;
+  }
+  if (conv.active) conv.phase = "speaking";
+  if (r) await say(r.reply, r.audio_base64);
+  if (r && r.outcome === "ended") return endConversation("Baat khatam. Phir se baat karni ho to mic dabaiye.");
+  if (conv.active) startListening();
+  else setState("idle");
+}
+
+function addNote(text) {
+  const chat = $("chat"); clearEmpty(chat);
+  const d = document.createElement("div");
+  d.className = "note"; d.textContent = text;
+  chat.appendChild(d); chat.scrollTop = chat.scrollHeight;
+}
+
+function clearEmpty(el) { const x = el.querySelector(".empty"); if (x) x.remove(); }
+function addBubble(who, text, meta, audioSrc) {
+  const chat = $("chat"); clearEmpty(chat);
+  const d = document.createElement("div");
+  d.className = "bubble " + who;
+  d.innerHTML = `${esc(text)}${meta || audioSrc ? `<div class="meta">${esc(meta || "")}${audioSrc ? '<button class="replay">▶ suno</button>' : ""}</div>` : ""}`;
+  if (audioSrc) d.querySelector(".replay").onclick = () => { stopPlayback(); play(audioSrc); };
+  chat.appendChild(d); chat.scrollTop = chat.scrollHeight;
+}
+function addPending(pending, outcome) {
+  document.querySelectorAll(".pending .row").forEach((r) => r.remove());  // older cards are no longer actionable
+  const chat = $("chat"), d = document.createElement("div");
+  d.className = "pending";
+  const big = outcome === "awaiting_second_confirm" ? "<b>Bada amount, dobara confirm kijiye.</b>" : "<b>Save karun?</b>";
+  d.innerHTML = `${big}<ul>${pending.map((p) => `<li>${esc(p.summary)}</li>`).join("")}</ul>
+    <div class="row"><button class="btn ok small">Haan, save karo</button><button class="btn ghost small">Nahi</button></div>`;
+  const [yes, no] = d.querySelectorAll("button");
+  yes.onclick = () => sendText("haan");
+  no.onclick = () => sendText("nahi");
+  chat.appendChild(d); chat.scrollTop = chat.scrollHeight;
+}
+function addDone(committed) {
+  document.querySelectorAll(".pending .row").forEach((r) => r.remove());
+  const chat = $("chat"), d = document.createElement("div");
+  d.className = "done";
+  d.textContent = "✓ Khate mein save: " + committed.map((c) => c.summary).join(", ");
+  chat.appendChild(d); chat.scrollTop = chat.scrollHeight;
+}
+
+// ======================================================= shop data
+async function loadShops(select) {
+  const { merchants } = await call("/demo/merchants");
+  if (!merchants.length) {
+    $("shop").innerHTML = `<option value="">Koi shop nahi: "+ Demo shop" dabaiye</option>`;
+    S.shop = null; return;
+  }
+  $("shop").innerHTML = merchants.map((m) => `<option value="${m.merchant_id}">${esc(m.name)}</option>`).join("");
+  $("shop").value = select || localStorageGet("shop") || merchants[0].merchant_id;
+  if (!$("shop").value) $("shop").value = merchants[0].merchant_id;
+  await useShop($("shop").value);
+}
+function localStorageGet(k) { try { return localStorage.getItem("khata." + k); } catch { return null; } }
+function localStorageSet(k, v) { try { localStorage.setItem("khata." + k, v); } catch {} }
+
+async function useShop(id) {
+  S.shop = id; localStorageSet("shop", id);
+  S.session = "app-" + Math.random().toString(36).slice(2, 8);
+  $("session").textContent = `· session ${S.session}`;
+  $("chat").innerHTML = '<div class="empty">Boliye ya likhiye. Jawab yahan aur awaaz mein aayega.</div>';
+  $("feed").innerHTML = '<div class="empty">UPI payments and alerts appear and are spoken here.</div>';
+  connectLive();
+  await refresh();
+}
+
+async function refresh() {
+  if (!S.shop) return;
+  const [cust, dues, sum, un] = await Promise.all([
+    call(api("/customers")), call(api("/dues?filter=today")), call(api("/summary")), call(api("/payments/unmatched")),
+  ]);
+  S.customers = cust.customers;
+  $("today").textContent = "· " + new Date(sum.date + "T00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  $("sGiven").textContent = sum.credit_given; $("sGot").textContent = sum.collected; $("sOut").textContent = sum.outstanding;
+  renderDues(dues); renderCustomers(); renderPayForm(); renderUnmatched(un.payments);
+}
+
+function amtClass(p) { return p > 0 ? "owe" : p < 0 ? "adv" : "zero"; }
+
+function renderDues(d) {
+  const today = new Date().toISOString().slice(0, 10);
+  $("dues").innerHTML = d.customers.length ? d.customers.map((c) => `
+    <div class="item">
+      <div class="who"><b>${esc(c.name)} ${c.overdue && c.overdue !== "₹0" ? '<span class="badge">overdue</span>' : '<span class="badge today">aaj</span>'}</b>
+        <span class="muted">${c.next_due_date ? "due " + esc(c.next_due_date) : ""}${c.phone_last4 ? " · 📞 …" + esc(c.phone_last4) : ""}</span></div>
+      <div class="amt owe">${esc(c.due)}</div>
+      <button class="btn ghost small" data-remind="${c.customer_id}">Reminder</button>
+    </div>`).join("") : '<div class="empty">Aaj kisi ka paisa due nahi hai. 🎉</div>';
+  $("remindAll").hidden = !d.customers.length;
+  $("dues").querySelectorAll("[data-remind]").forEach((b) => b.onclick = () => remind([b.dataset.remind]));
+}
+
+function renderCustomers() {
+  $("customers").innerHTML = S.customers.length ? S.customers.map((c) => `
+    <div class="item click" data-c="${c.customer_id}">
+      <div class="who"><b>${esc(c.name)}</b><span class="muted">${c.nicknames.length ? esc(c.nicknames.join(", ")) : ""}${c.phone_last4 ? " · 📞 …" + esc(c.phone_last4) : ""}</span></div>
+      <div class="amt ${amtClass(c.balance_paise)}">${c.balance_paise < 0 ? esc(c.balance.replace("-", "")) + " adv" : esc(c.balance)}</div>
+    </div><div id="d-${c.customer_id}"></div>`).join("") : '<div class="empty">Abhi koi customer nahi. Bolkar banaiye: "Kavita ko 200 ka saamaan diya".</div>';
+  $("customers").querySelectorAll("[data-c]").forEach((el) => el.onclick = () => toggleDetail(el.dataset.c));
+  if (S.openCustomer) toggleDetail(S.openCustomer, true);
+}
+
+async function toggleDetail(id, keepOpen) {
+  const box = $("d-" + id); if (!box) return;
+  if (box.innerHTML && !keepOpen) { box.innerHTML = ""; S.openCustomer = null; return; }
+  S.openCustomer = id;
+  const [d, h] = await Promise.all([call(api(`/customers/${id}`)), call(api(`/customers/${id}/history?limit=10`))]);
+  const label = { CREDIT: "Udhaar", PAYMENT: "Payment", REVERSAL: "Cancel" };
+  box.innerHTML = `<div class="detail">
+    <div>Baaki <b>${esc(d.balance)}</b>${d.next_due ? ` · agla due ${esc(d.next_due)} (${esc(d.next_due_date)})` : ""}${d.upi_ids.length ? ` · UPI ${esc(d.upi_ids.join(", "))}` : ""}</div>
+    <table>${h.entries.map((e) => `<tr><td>${esc(new Date(e.at + (e.at.endsWith("Z") || e.at.includes("+") ? "" : "Z")).toLocaleDateString("en-IN", { day: "numeric", month: "short" }))}</td>
+      <td>${label[e.type] || e.type}${e.items ? " · " + esc(e.items) : ""}${e.source === "VOICE" ? " 🎙" : e.source === "UPI_AUTO" ? " ⚡UPI" : ""}</td>
+      <td style="text-align:right;font-weight:600;color:${e.type === "CREDIT" ? "var(--err)" : "var(--ok)"}">${e.type === "CREDIT" ? "+" : "−"}${esc(e.amount)}</td></tr>`).join("") || '<tr><td class="muted">Koi entry nahi</td></tr>'}</table>
+    ${d.balance_paise > 0 ? `<button class="btn ghost small" style="margin-top:8px" data-remind="${id}">Reminder bhejo</button>` : ""}
+  </div>`;
+  const rb = box.querySelector("[data-remind]"); if (rb) rb.onclick = () => remind([id]);
+}
+
+async function remind(ids) {
+  try {
+    const r = await post(api("/reminders"), ids ? { customer_ids: ids } : { all_due: true });
+    toast(`${r.sent} reminder bheje (WhatsApp, UPI link ke saath)`);
+  } catch (e) { toast("Reminder nahi gaya: " + e.message); }
+}
+$("remindAll").onclick = () => remind(null);
+
+// ======================================================= UPI payments
+function renderPayForm() {
+  const prev = $("payVpa").value;  // the customer's saved UPI ID is looked up when "pay" is pressed
+  $("payVpa").innerHTML = `<option value="">Customer ki UPI ID chuniye…</option>` +
+    S.customers.map((c) => `<option value="cust:${c.customer_id}">${esc(c.name)} (${esc(c.balance)})</option>`).join("");
+  if (prev) $("payVpa").value = prev;
+}
+
+$("payBtn").onclick = async () => {
+  let vpa = $("payVpaOther").value.trim();
+  const amt = Number($("payAmt").value);
+  if (!vpa) {
+    const sel = $("payVpa").value;
+    if (!sel) return toast("UPI ID chuniye ya likhiye.");
+    const d = await call(api(`/customers/${sel.slice(5)}`));
+    if (!d.upi_ids.length) return toast(`${d.name} ki UPI ID save nahi hai. Neeche likh kar pay kijiye, phir "kiska hai?" mein assign kijiye.`);
+    vpa = d.upi_ids[0];
+  }
+  if (!(amt > 0)) return toast("Amount sahi daaliye.");
+  try {
+    const r = await post(api("/payments/incoming"), { payer_vpa: vpa, amount_rupees: amt });
+    if (!S.ws) { addAnnouncement({ type: "upi_" + r.status.toLowerCase(), text: r.announcement, at: new Date().toISOString() }); say(r.announcement); }
+    $("payVpaOther").value = "";
+    refresh();
+  } catch (e) { toast("Payment fail: " + e.message); }
+};
+
+function renderUnmatched(list) {
+  $("unCount").textContent = list.length ? `(${list.length})` : "";
+  const opts = S.customers.map((c) => `<option value="${c.customer_id}">${esc(c.name)} (${esc(c.balance)})</option>`).join("");
+  $("unmatched").innerHTML = list.length ? list.map((t) => `
+    <div class="item">
+      <div class="who"><b>${esc(t.amount)}</b><span class="muted">${esc(t.payer_vpa)}</span></div>
+      <select data-sel="${esc(t.txn_id)}" style="max-width:180px;border:1px solid var(--line);border-radius:8px;padding:5px">${opts}</select>
+      <button class="btn ok small" data-assign="${esc(t.txn_id)}">Iska hai</button>
+    </div>`).join("") : '<div class="empty">Sab payments match ho gaye.</div>';
+  $("unmatched").querySelectorAll("[data-assign]").forEach((b) => b.onclick = async () => {
+    const txn = b.dataset.assign, cid = $("unmatched").querySelector(`[data-sel="${CSS.escape(txn)}"]`).value;
+    try { const r = await post(api(`/payments/${encodeURIComponent(txn)}/assign`), { customer_id: cid }); toast(r.spoken); say(r.spoken); refresh(); }
+    catch (e) { toast(e.message); }
+  });
+}
+
+// ======================================================= live announcements
+function connectLive() {
+  if (S.ws) { S.ws.onclose = null; S.ws.close(); S.ws = null; }
+  if (!S.shop) return;
+  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/merchants/${S.shop}/events`);
+  const shop = S.shop;
+  ws.onopen = () => { S.ws = ws; $("live").textContent = "● Live"; };
+  ws.onclose = () => { if (S.shop !== shop) return; S.ws = null; $("live").textContent = "○ Live off"; setTimeout(() => S.shop === shop && connectLive(), 3000); };
+  ws.onmessage = (m) => { const ev = JSON.parse(m.data); addAnnouncement(ev); say(ev.text); refresh(); };
+}
+function addAnnouncement(ev) {
+  const feed = $("feed"); clearEmpty(feed);
+  const d = document.createElement("div");
+  d.className = "ann " + ev.type;
+  d.innerHTML = `${esc(ev.text)}<small>${new Date(ev.at).toLocaleTimeString("en-IN")}</small>`;
+  feed.prepend(d);
+}
+
+// ======================================================= wiring
+$("tabs").onclick = (e) => {
+  const t = e.target.dataset.t; if (!t) return;
+  $("tabs").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.t === t));
+  document.querySelectorAll("[data-p]").forEach((p) => p.hidden = p.dataset.p !== t);
+};
+$("tips").innerHTML = TIPS.map((t) => `<button>${esc(t)}</button>`).join("");
+$("tips").onclick = (e) => { if (e.target.tagName === "BUTTON") sendText(e.target.textContent); };
+$("send").onclick = () => sendText($("text").value);
+$("text").onkeydown = (e) => { if (e.key === "Enter") sendText($("text").value); };
+$("shop").onchange = () => useShop($("shop").value);
+$("seed").onclick = async () => { const m = await post("/demo/seed"); await loadShops(m.merchant_id); toast("Demo shop ready: Sharma General Store"); };
+if (!navigator.mediaDevices || !window.MediaRecorder) {
+  $("hint").textContent = "Is browser mein mic nahi chalega; likh kar baat kijiye. (Chrome/Edge on localhost works.)";
+}
+setState("idle");
+loadShops().catch((e) => toast("Backend se connect nahi hua: " + e.message));
+</script>
+</body>
+</html>

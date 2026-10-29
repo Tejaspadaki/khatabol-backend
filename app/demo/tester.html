@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Khata Voice API Tester</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f5f6f8; --card: #ffffff; --ink: #1f2328; --muted: #656d76; --line: #d8dee4;
+    --accent: #0a66c2; --accent-soft: #e8f1fb; --ok: #1a7f37; --ok-soft: #e6f4ea;
+    --err: #cf222e; --err-soft: #fdecea; --warn: #9a6700;
+    --get: #1a7f37; --post: #0a66c2; --ws: #8250df;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+  header { background: var(--card); border-bottom: 1px solid var(--line); padding: 12px 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; position: sticky; top: 0; z-index: 2; }
+  h1 { font-size: 16px; margin: 0 8px 0 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
+  .layout { display: grid; grid-template-columns: 290px minmax(0, 1fr) 340px; gap: 14px; padding: 14px 16px; align-items: start; }
+  @media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  nav .ep { display: flex; gap: 8px; align-items: baseline; width: 100%; text-align: left; padding: 6px 8px; border: 0; border-radius: 6px; background: none; cursor: pointer; font: inherit; color: var(--ink); }
+  nav .ep:hover { background: var(--bg); }
+  nav .ep.active { background: var(--accent-soft); }
+  nav .ep span.p { font-family: ui-monospace, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+  .m { font: 600 11px ui-monospace, Consolas, monospace; min-width: 38px; }
+  .m.GET { color: var(--get); } .m.POST { color: var(--post); } .m.WS { color: var(--ws); }
+  input, select, textarea, button { font: inherit; }
+  input, select, textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
+  textarea { font-family: ui-monospace, Consolas, monospace; font-size: 12px; min-height: 70px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 3px; }
+  label .req { color: var(--err); }
+  button.primary { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-weight: 600; }
+  button.secondary { background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row > .grow { flex: 1; min-width: 160px; }
+  .title { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .title code { font-size: 14px; overflow-wrap: anywhere; }
+  .desc { color: var(--muted); margin: 4px 0 0; }
+  .status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-weight: 600; font-size: 12px; }
+  .status.ok { background: var(--ok-soft); color: var(--ok); } .status.err { background: var(--err-soft); color: var(--err); }
+  pre { background: #f6f8fa; border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow: auto; max-height: 460px; font-size: 12px; margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .history div { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 12px; cursor: pointer; }
+  .history div:hover { color: var(--accent); }
+  .events { max-height: 300px; overflow: auto; }
+  .event { border-left: 3px solid var(--ok); padding: 4px 8px; margin: 6px 0; background: #fafbfc; font-size: 12px; }
+  .event.upi_unmatched { border-left-color: var(--warn); }
+  .pill { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 1px 8px; font-size: 12px; }
+  .rec { background: var(--err) !important; color: #fff !important; }
+  audio { width: 100%; margin-top: 8px; }
+  .hint { background: var(--accent-soft); border-radius: 6px; padding: 8px 10px; font-size: 12px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Khata Voice API Tester</h1>
+  <label style="margin:0">Merchant</label>
+  <select id="merchant" style="width:260px"></select>
+  <button class="secondary" id="seedBtn">Seed demo shop</button>
+  <button class="secondary" id="refreshBtn">Refresh lists</button>
+  <span class="pill" id="health">checking…</span>
+  <a href="/docs" target="_blank" class="muted">OpenAPI docs</a>
+  <a href="/demo/simulate" target="_blank" class="muted">Demo console</a>
+</header>
+
+<div class="layout">
+  <nav class="card" id="nav"></nav>
+
+  <main>
+    <section class="card" id="form"></section>
+    <section class="card" id="result" style="margin-top:14px; display:none">
+      <div class="row"><strong>Response</strong><span id="resStatus"></span><span class="muted" id="resMeta"></span></div>
+      <div id="resAudio"></div>
+      <pre id="resBody"></pre>
+    </section>
+  </main>
+
+  <aside>
+    <section class="card">
+      <div class="row"><strong class="grow">Live events (WebSocket)</strong>
+        <button class="secondary" id="wsBtn">Connect</button></div>
+      <p class="muted" id="wsState">Not connected. Connect, then send a payment.</p>
+      <div class="events" id="events"></div>
+    </section>
+    <section class="card" style="margin-top:14px">
+      <strong>Request history</strong>
+      <p class="muted">Click an entry to open that endpoint again.</p>
+      <div class="history" id="history"></div>
+    </section>
+  </aside>
+</div>
+
+<script>
+// ------------------------------------------------------------------ endpoint catalog
+// in: path | query | body | file | form. type: text | number | bool | select | json | customer | customers
+const E = [
+  { g: "System", m: "GET", p: "/health", d: "Liveness check." },
+  { g: "Demo", m: "POST", p: "/demo/seed", d: "Create the demo shop (Sharma General Store) with 5 customers.", after: "seed" },
+  { g: "Demo", m: "GET", p: "/demo/merchants", d: "All shops, newest first." },
+
+  { g: "Merchants", m: "POST", p: "/api/merchants", d: "Create a shop.", after: "merchants", f: [
+    { n: "name", in: "body", req: 1, v: "Test Kirana Store" },
+    { n: "phone", in: "body", v: "9876500000" },
+    { n: "upi_vpa", in: "body", v: "teststore@paytm" },
+    { n: "language", in: "body", type: "select", options: ["hi", "mr", "en"], v: "hi" },
+    { n: "large_amount_threshold_rupees", in: "body", type: "number", v: 10000 } ] },
+  { g: "Merchants", m: "GET", p: "/api/merchants/{merchant_id}", d: "Shop profile." },
+
+  { g: "Customers", m: "GET", p: "/api/merchants/{merchant_id}/customers", d: "List customers, or fuzzy search with q (try 'ramesh bhaiya', 'sunitha').", f: [
+    { n: "q", in: "query", v: "" } ] },
+  { g: "Customers", m: "POST", p: "/api/merchants/{merchant_id}/customers", d: "Create a customer.", after: "customers", f: [
+    { n: "name", in: "body", req: 1, v: "Kavita Joshi" },
+    { n: "phone", in: "body", v: "9000011111" },
+    { n: "nicknames", in: "body", type: "json", v: '["kavita didi"]' } ] },
+  { g: "Customers", m: "GET", p: "/api/merchants/{merchant_id}/customers/{customer_id}", d: "Balance, next due, overdue, last payment, UPI IDs.", f: [
+    { n: "customer_id", in: "path", type: "customer", req: 1 } ] },
+  { g: "Customers", m: "GET", p: "/api/merchants/{merchant_id}/customers/{customer_id}/history", d: "Ledger entries, newest first. Copy an entry_id from here to reverse it.", f: [
+    { n: "customer_id", in: "path", type: "customer", req: 1 },
+    { n: "limit", in: "query", type: "number", v: 50 } ] },
+  { g: "Customers", m: "POST", p: "/api/merchants/{merchant_id}/customers/{customer_id}/credit", d: "Record udhaar. due can be YYYY-MM-DD or spoken: kal, somvar, 5 tareekh, agle hafte.", after: "customers", f: [
+    { n: "customer_id", in: "path", type: "customer", req: 1 },
+    { n: "amount_rupees", in: "body", type: "number", req: 1, v: 350 },
+    { n: "due", in: "body", v: "somvar" },
+    { n: "items", in: "body", v: "aata, tel" },
+    { n: "note", in: "body", v: "" } ] },
+  { g: "Customers", m: "POST", p: "/api/merchants/{merchant_id}/customers/{customer_id}/payment", d: "Record a payment from the customer.", after: "customers", f: [
+    { n: "customer_id", in: "path", type: "customer", req: 1 },
+    { n: "amount_rupees", in: "body", type: "number", req: 1, v: 200 },
+    { n: "mode", in: "body", type: "select", options: ["cash", "upi", "other"], v: "cash" },
+    { n: "note", in: "body", v: "" } ] },
+  { g: "Customers", m: "POST", p: "/api/merchants/{merchant_id}/customers/{customer_id}/upi", d: "Link a UPI ID so this customer's UPI payments auto-settle.", f: [
+    { n: "customer_id", in: "path", type: "customer", req: 1 },
+    { n: "vpa", in: "body", req: 1, v: "kavita@ybl" } ] },
+  { g: "Customers", m: "POST", p: "/api/merchants/{merchant_id}/entries/{entry_id}/reverse", d: "Reverse an entry (paste entry_id from history).", after: "customers", f: [
+    { n: "entry_id", in: "path", req: 1, v: "" } ] },
+
+  { g: "Agent", m: "POST", p: "/api/merchants/{merchant_id}/agent/message", d: "Text turn with the AI agent (Groq). Writes need a follow-up 'haan' in the same session.", f: [
+    { n: "text", in: "body", req: 1, v: "Ramesh Patil ka kitna baaki hai?", examples: [
+      "Ramesh Patil ka kitna baaki hai?", "Mohan Lal ko 120 rupaye ka saamaan diya, kal tak", "haan", "nahi",
+      "Ramesh Sharma ko 100 ka saamaan aur Sunita Devi ne 50 cash lautaye", "Aaj kiska paisa aana hai?",
+      "Sabko reminder bhej do", "galat hai, undo karo", "Ramesh ko 500 diye"] },
+    { n: "session_id", in: "body", v: "tester" },
+    { n: "speak", in: "body", type: "bool", v: false } ], after: "customers" },
+  { g: "Agent", m: "POST", p: "/api/merchants/{merchant_id}/agent/voice", d: "Voice turn: Sarvam STT → agent → Sarvam TTS. Record with the mic or pick an audio file.", f: [
+    { n: "audio", in: "file", req: 1 },
+    { n: "session_id", in: "form", v: "tester-voice" } ], after: "customers" },
+  { g: "Agent", m: "POST", p: "/api/merchants/{merchant_id}/tts", d: "Sarvam text-to-speech. Returns a WAV you can play.", f: [
+    { n: "text", in: "body", req: 1, v: "Ramesh Patil ne ₹300 UPI se diye. Ab ₹200 baaki." } ] },
+
+  { g: "Collections", m: "GET", p: "/api/merchants/{merchant_id}/dues", d: "Who owes money.", f: [
+    { n: "filter", in: "query", type: "select", options: ["all", "today", "overdue", "this_week"], v: "all" } ] },
+  { g: "Collections", m: "POST", p: "/api/merchants/{merchant_id}/reminders", d: "Send WhatsApp reminders with UPI links (delivery mocked). Tick all_due or pick customers.", f: [
+    { n: "all_due", in: "body", type: "bool", v: true },
+    { n: "customer_ids", in: "body", type: "customers" } ] },
+  { g: "Collections", m: "GET", p: "/api/merchants/{merchant_id}/summary", d: "Daily summary. Leave day empty for today.", f: [
+    { n: "day", in: "query", type: "date", v: "" } ] },
+
+  { g: "Payments", m: "POST", p: "/api/merchants/{merchant_id}/payments/incoming", d: "Simulate a UPI payment the shop received. Known VPA in seed: ramesh.p@okaxis. Try an unknown one like sunita99@ybl.", after: "payments", f: [
+    { n: "payer_vpa", in: "body", req: 1, v: "ramesh.p@okaxis", examples: ["ramesh.p@okaxis", "sunita99@ybl", "walkin@ybl"] },
+    { n: "amount_rupees", in: "body", type: "number", req: 1, v: 300 },
+    { n: "payer_name", in: "body", v: "" },
+    { n: "note", in: "body", v: "", hint: "Put KHATA-<ref_code> here to match via a reminder link" },
+    { n: "txn_id", in: "body", v: "", hint: "Leave empty to auto-generate; reuse one to test duplicates" } ] },
+  { g: "Payments", m: "GET", p: "/api/merchants/{merchant_id}/payments/unmatched", d: "Payments from unknown payers waiting for 'kiska hai?'.", after: "payments" },
+  { g: "Payments", m: "POST", p: "/api/merchants/{merchant_id}/payments/{txn_id}/assign", d: "Assign an unknown payment to a customer (also learns their UPI ID).", after: "payments", f: [
+    { n: "txn_id", in: "path", type: "txn", req: 1 },
+    { n: "customer_id", in: "body", type: "customer", req: 1 } ] },
+  { g: "Payments", m: "POST", p: "/api/merchants/{merchant_id}/payments/{txn_id}/undo", d: "'Ye uska nahi tha': reverse an auto-settled payment.", after: "payments", f: [
+    { n: "txn_id", in: "path", req: 1, v: "", hint: "txn_id of an APPLIED payment (see incoming responses)" } ] },
+];
+
+// ------------------------------------------------------------------ state + helpers
+const $ = (id) => document.getElementById(id);
+const state = { current: null, customers: [], unmatched: [], recorded: null, ws: null };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const mid = () => $("merchant").value;
+
+async function getJSON(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(`${r.status} ${path}`);
+  return r.json();
+}
+
+async function loadMerchants(select) {
+  const { merchants } = await getJSON("/demo/merchants");
+  $("merchant").innerHTML = merchants.length
+    ? merchants.map((m) => `<option value="${m.merchant_id}">${esc(m.name)} · ${m.merchant_id.slice(0, 8)}</option>`).join("")
+    : `<option value="">No shops yet: click "Seed demo shop"</option>`;
+  if (select) $("merchant").value = select;
+  await loadLists();
+}
+
+async function loadLists() {
+  state.customers = []; state.unmatched = [];
+  if (mid()) {
+    try { state.customers = (await getJSON(`/api/merchants/${mid()}/customers`)).customers; } catch {}
+    try { state.unmatched = (await getJSON(`/api/merchants/${mid()}/payments/unmatched`)).payments; } catch {}
+  }
+  if (state.current) renderForm(state.current, collect(false));
+}
+
+// ------------------------------------------------------------------ nav + form
+function shortPath(p) {
+  if (p === "/api/merchants/{merchant_id}") return "/api/merchants/{m}";
+  return p.replace("/api/merchants/{merchant_id}", "…").replace("{customer_id}", "{c}")
+          .replace("{entry_id}", "{e}").replace("{txn_id}", "{txn}");
+}
+
+function renderNav() {
+  let html = "", group = "";
+  E.forEach((e, i) => {
+    if (e.g !== group) { group = e.g; html += `<h2>${group}</h2>`; }
+    const short = shortPath(e.p);
+    html += `<button class="ep" data-i="${i}"><span class="m ${e.m}">${e.m}</span><span class="p">${esc(short)}</span></button>`;
+  });
+  html += `<h2>WebSocket</h2><button class="ep" id="wsNav"><span class="m WS">WS</span><span class="p">/ws/merchants/{merchant_id}/events</span></button>`;
+  $("nav").innerHTML = html;
+  $("nav").onclick = (ev) => {
+    const b = ev.target.closest(".ep"); if (!b) return;
+    if (b.id === "wsNav") { $("wsBtn").scrollIntoView({ behavior: "smooth" }); return; }
+    select(Number(b.dataset.i));
+  };
+}
+
+function select(i, values) {
+  state.current = i;
+  history.replaceState(null, "", "#" + i);  // bookmarkable: /demo/tester#9
+  document.querySelectorAll("nav .ep").forEach((b) => b.classList.toggle("active", Number(b.dataset.i) === i));
+  renderForm(i, values);
+}
+
+function customerOptions(selected) {
+  if (!state.customers.length) return `<option value="">No customers: seed or create one</option>`;
+  return state.customers.map((c) =>
+    `<option value="${c.customer_id}" ${c.customer_id === selected ? "selected" : ""}>${esc(c.name)} (${esc(c.balance)})</option>`).join("");
+}
+
+function fieldHTML(f, value) {
+  const id = `f_${f.n}`, v = value ?? f.v ?? "";
+  const lab = `<label for="${id}">${esc(f.n)} <span class="muted">(${f.in})</span>${f.req ? ' <span class="req">*</span>' : ""}</label>`;
+  let input;
+  switch (f.type) {
+    case "select":
+      input = `<select id="${id}">${f.options.map((o) => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`; break;
+    case "bool":
+      return `<label style="display:flex;gap:6px;align-items:center;color:var(--ink)"><input type="checkbox" id="${id}" style="width:auto" ${v === true || v === "true" ? "checked" : ""}> ${esc(f.n)} <span class="muted">(${f.in})</span></label>`;
+    case "customer":
+      input = `<select id="${id}">${customerOptions(v)}</select>`; break;
+    case "customers":
+      input = `<select id="${id}" multiple size="5">${customerOptions()}</select><div class="muted">Ctrl/Cmd-click to pick several. Ignored when all_due is ticked.</div>`; break;
+    case "txn":
+      input = `<input id="${id}" value="${esc(v)}" list="txnList" placeholder="txn_id">
+        <datalist id="txnList">${state.unmatched.map((t) => `<option value="${esc(t.txn_id)}">${esc(t.amount)} from ${esc(t.payer_vpa)}</option>`).join("")}</datalist>
+        <div class="muted">${state.unmatched.length ? `${state.unmatched.length} unmatched payment(s) available in the dropdown.` : "No unmatched payments right now."}</div>`; break;
+    case "json":
+      input = `<textarea id="${id}">${esc(v)}</textarea>`; break;
+    case "number":
+      input = `<input id="${id}" type="number" step="any" value="${esc(v)}">`; break;
+    case "date":
+      input = `<input id="${id}" type="date" value="${esc(v)}">`; break;
+    default:
+      if (f.in === "file") {
+        input = `<div class="row"><button type="button" class="secondary" id="micBtn">Hold to record</button>
+          <input type="file" id="${id}" accept="audio/*" class="grow"></div>
+          <div class="muted" id="recInfo">Hold the button and speak (e.g. "Ramesh Patil ka kitna baaki hai"), or choose a file.</div>`;
+      } else {
+        input = `<input id="${id}" value="${esc(v)}">`;
+      }
+  }
+  let extra = "";
+  if (f.examples) extra = `<div class="row" style="margin-top:4px">${f.examples.map((x) =>
+    `<button type="button" class="secondary ex" data-f="${id}" style="padding:2px 8px;font-size:12px">${esc(x)}</button>`).join("")}</div>`;
+  if (f.hint) extra += `<div class="muted">${esc(f.hint)}</div>`;
+  return lab + input + extra;
+}
+
+function renderForm(i, values = {}) {
+  const e = E[i];
+  const fields = (e.f || []).map((f) => fieldHTML(f, values[f.n])).join("");
+  $("form").innerHTML = `
+    <div class="title"><span class="m ${e.m}">${e.m}</span><code>${esc(e.p)}</code></div>
+    <p class="desc">${esc(e.d)}</p>
+    ${fields || '<p class="muted">No inputs.</p>'}
+    <div class="row" style="margin-top:14px"><button class="primary" id="sendBtn">Send request</button>
+      <span class="muted" id="preview"></span></div>
+    ${e.p.includes("{merchant_id}") && !mid() ? '<div class="hint">Pick or seed a merchant first.</div>' : ""}`;
+  $("sendBtn").onclick = send;
+  $("form").querySelectorAll(".ex").forEach((b) => b.onclick = () => { $(b.dataset.f).value = b.textContent; });
+  if ($("micBtn")) setupMic();
+}
+
+function collect(strict = true) {
+  const e = E[state.current], out = {};
+  for (const f of e.f || []) {
+    const el = $(`f_${f.n}`); if (!el) continue;
+    if (f.type === "bool") out[f.n] = el.checked;
+    else if (f.type === "customers") out[f.n] = [...el.selectedOptions].map((o) => o.value);
+    else if (f.in === "file") out[f.n] = state.recorded || el.files[0] || null;
+    else out[f.n] = el.value;
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------ voice recording
+function setupMic() {
+  let rec, chunks = [];
+  const btn = $("micBtn");
+  const start = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      rec = new MediaRecorder(stream); chunks = [];
+      rec.ondataavailable = (e) => chunks.push(e.data);
+      rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+        state.recorded = new File([blob], "recording.webm", { type: blob.type });
+        $("recInfo").innerHTML = `Recorded ${(blob.size / 1024).toFixed(1)} KB. <audio controls src="${URL.createObjectURL(blob)}"></audio>`;
+      };
+      rec.start(); btn.classList.add("rec"); btn.textContent = "Recording… release to stop";
+    } catch (err) { $("recInfo").textContent = "Mic not available: " + err.message; }
+  };
+  const stop = () => {
+    if (rec && rec.state === "recording") rec.stop();
+    btn.classList.remove("rec"); btn.textContent = "Hold to record";
+  };
+  btn.onpointerdown = start; btn.onpointerup = stop; btn.onpointerleave = stop;
+  $("f_audio").onchange = () => { state.recorded = null; };
+}
+
+// ------------------------------------------------------------------ send
+async function send() {
+  const e = E[state.current], vals = collect();
+  let path = e.p.replace("{merchant_id}", encodeURIComponent(mid()));
+  const query = new URLSearchParams(), body = {}, form = new FormData();
+  let hasBody = false, hasForm = false;
+
+  for (const f of e.f || []) {
+    let v = vals[f.n];
+    if (f.req && (v === "" || v == null)) return showError(`"${f.n}" is required.`);
+    if (f.in === "path") { path = path.replace(`{${f.n}}`, encodeURIComponent(v)); continue; }
+    if (f.in === "query") { if (v !== "" && v != null) query.set(f.n, v); continue; }
+    if (f.in === "file") { if (v) { form.append(f.n, v, v.name || "audio.webm"); hasForm = true; } continue; }
+    if (f.in === "form") { if (v !== "") { form.append(f.n, v); hasForm = true; } continue; }
+    if (f.in === "body") {
+      if (v === "" || v == null) continue;
+      if (f.type === "number") v = Number(v);
+      if (f.type === "json") { try { v = JSON.parse(v); } catch { return showError(`"${f.n}" is not valid JSON.`); } }
+      if (f.type === "customers" && (vals.all_due || !v.length)) continue;
+      body[f.n] = v; hasBody = true;
+    }
+  }
+  if (e.m === "POST" && !hasForm && !hasBody && e.f) hasBody = true;  // send {} so validation errors show
+
+  const url = path + (query.toString() ? "?" + query : "");
+  const opts = { method: e.m };
+  if (hasForm) opts.body = form;
+  else if (hasBody) { opts.body = JSON.stringify(body); opts.headers = { "Content-Type": "application/json" }; }
+
+  $("sendBtn").disabled = true; $("preview").textContent = "Sending…";
+  const t0 = performance.now();
+  try {
+    const r = await fetch(url, opts);
+    const ms = Math.round(performance.now() - t0);
+    const type = r.headers.get("content-type") || "";
+    let shown, audioSrc = null;
+    if (type.startsWith("audio/")) {
+      const blob = await r.blob();
+      audioSrc = URL.createObjectURL(blob);
+      shown = `(${type}, ${(blob.size / 1024).toFixed(1)} KB audio)`;
+    } else if (type.includes("json")) {
+      const data = await r.json();
+      if (data && data.audio_base64) {
+        audioSrc = `data:${data.audio_mime || "audio/wav"};base64,${data.audio_base64}`;
+        data.audio_base64 = `<${Math.round(data.audio_base64.length * 0.75 / 1024)} KB base64 audio, playable above>`;
+      }
+      shown = JSON.stringify(data, null, 2);
+    } else {
+      const txt = await r.text();
+      shown = type.includes("html") ? `(HTML page, ${txt.length} chars; open ${url} in a new tab)` : txt;
+    }
+    showResult(r.status, ms, e.m, url, shown, audioSrc);
+    addHistory(e, r.status, ms, vals);
+    if (r.ok && e.after) await afterSuccess(e.after, shown);
+  } catch (err) {
+    showError("Network error: " + err.message);
+  } finally {
+    $("sendBtn").disabled = false; $("preview").textContent = "";
+    state.recorded = null;
+  }
+}
+
+async function afterSuccess(kind, shown) {
+  if (kind === "seed" || kind === "merchants") {
+    try { await loadMerchants(JSON.parse(shown).merchant_id); } catch { await loadMerchants(); }
+  } else {
+    await loadLists();
+  }
+}
+
+function showResult(status, ms, method, url, text, audioSrc) {
+  $("result").style.display = "";
+  const ok = status < 400;
+  $("resStatus").innerHTML = `<span class="status ${ok ? "ok" : "err"}">${status}</span>`;
+  $("resMeta").textContent = `${ms} ms · ${method} ${url}`;
+  $("resBody").textContent = text;
+  $("resAudio").innerHTML = audioSrc ? `<audio controls autoplay src="${audioSrc}"></audio>` : "";
+}
+
+function showError(msg) {
+  $("result").style.display = "";
+  $("resStatus").innerHTML = `<span class="status err">error</span>`;
+  $("resMeta").textContent = "";
+  $("resBody").textContent = msg;
+  $("resAudio").innerHTML = "";
+}
+
+function addHistory(e, status, ms, vals) {
+  const div = document.createElement("div");
+  const time = new Date().toLocaleTimeString();
+  div.innerHTML = `<span class="m ${e.m}">${e.m}</span> ${esc(shortPath(e.p))}
+    <span class="status ${status < 400 ? "ok" : "err"}">${status}</span> <span class="muted">${ms} ms · ${time}</span>`;
+  const i = E.indexOf(e), saved = { ...vals }; delete saved.audio;
+  div.onclick = () => select(i, saved);
+  $("history").prepend(div);
+}
+
+// ------------------------------------------------------------------ websocket
+function toggleWS() {
+  if (state.ws) { state.ws.close(); return; }
+  if (!mid()) { $("wsState").textContent = "Pick a merchant first."; return; }
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws/merchants/${mid()}/events`);
+  state.ws = ws;
+  ws.onopen = () => { $("wsState").textContent = `Connected to ${mid().slice(0, 8)}…`; $("wsBtn").textContent = "Disconnect"; };
+  ws.onclose = () => { state.ws = null; $("wsState").textContent = "Disconnected."; $("wsBtn").textContent = "Connect"; };
+  ws.onmessage = (m) => {
+    const ev = JSON.parse(m.data);
+    const d = document.createElement("div");
+    d.className = "event " + ev.type;
+    d.innerHTML = `<strong>${esc(ev.type)}</strong> <span class="muted">${new Date(ev.at).toLocaleTimeString()}</span><br>${esc(ev.text)}`;
+    $("events").prepend(d);
+    loadLists();
+  };
+}
+
+// ------------------------------------------------------------------ boot
+async function checkHealth() {
+  try { await getJSON("/health"); $("health").textContent = "backend up"; $("health").style.color = "var(--ok)"; }
+  catch { $("health").textContent = "backend down"; $("health").style.color = "var(--err)"; }
+}
+
+$("merchant").onchange = () => { if (state.ws) state.ws.close(); loadLists(); };
+$("seedBtn").onclick = async () => {
+  const r = await fetch("/demo/seed", { method: "POST" });
+  const m = await r.json(); await loadMerchants(m.merchant_id);
+};
+$("refreshBtn").onclick = () => loadMerchants(mid());
+$("wsBtn").onclick = toggleWS;
+
+const fromHash = () => Math.min(Math.max(parseInt(location.hash.slice(1), 10) || 0, 0), E.length - 1);
+window.addEventListener("hashchange", () => { if (fromHash() !== state.current) select(fromHash()); });
+
+renderNav();
+select(fromHash());
+checkHealth();
+loadMerchants();
+</script>
+</body>
+</html>

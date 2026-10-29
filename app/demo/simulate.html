@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Khata Voice Demo</title>
+<style>
+  :root { --bg:#f6f5f2; --card:#fff; --ink:#1d1d1b; --muted:#6b6a66; --line:#e2e0da; --accent:#00baf2; --ok:#1a7f4b; --warn:#b25e00; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  h1 { font-size:18px; margin:0; } h2 { font-size:15px; margin:0 0 10px; }
+  main { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:16px; padding:16px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  input, select, button { font:inherit; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--ink); }
+  input { width:100%; } button { background:var(--accent); color:#000; border:0; cursor:pointer; font-weight:600; }
+  .row { display:flex; gap:8px; margin-bottom:8px; } .row > * { flex:1; } .row > button { flex:0 0 auto; }
+  .log { max-height:420px; overflow:auto; display:flex; flex-direction:column; gap:6px; }
+  .msg { padding:8px 10px; border-radius:8px; border:1px solid var(--line); }
+  .me { align-self:flex-end; background:var(--bg); } .bot { border-left:3px solid var(--accent); }
+  .ev { border-left:3px solid var(--ok); } .ev.upi_unmatched { border-left-color:var(--warn); }
+  .muted { color:var(--muted); font-size:13px; }
+  .mic { width:100%; padding:14px; font-size:16px; user-select:none; touch-action:none; }
+  .mic.rec { background:#e5484d; color:#fff; }
+  .chips button { background:var(--bg); color:var(--ink); border:1px solid var(--line); font-weight:400; margin:0 6px 6px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Khata Voice: demo console</h1>
+  <select id="merchant"></select>
+  <button id="seed">Seed demo shop</button>
+  <label class="muted"><input type="checkbox" id="speak" checked style="width:auto"> speak replies (Sarvam TTS)</label>
+</header>
+<main>
+  <section>
+    <h2>Talk to the khata</h2>
+    <div class="row"><button id="mic" class="mic">Hold to talk</button></div>
+    <div class="chips" id="chips"></div>
+    <div class="row"><input id="text" placeholder="Ramesh Patil ko 500 ka saamaan diya, somvar tak"><button id="send">Send</button></div>
+    <div class="log" id="chat"></div>
+  </section>
+  <section>
+    <h2>Simulate UPI payment</h2>
+    <div class="row"><input id="vpa" value="ramesh.p@okaxis" placeholder="payer VPA"></div>
+    <div class="row"><input id="amt" type="number" value="300" min="1"><input id="note" placeholder="note (e.g. KHATA-ABCDE)"></div>
+    <div class="row"><button id="pay">Customer pays</button></div>
+    <p class="muted">Try an unknown payer like sunita99@ybl, then tell the agent "300 wala Sunita didi ka hai".</p>
+  </section>
+  <section>
+    <h2>Live announcements (Soundbox)</h2>
+    <div class="log" id="events"></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const sessionId = "demo-" + Math.random().toString(36).slice(2, 8);
+let ws;
+const samples = ["Ramesh ka kitna baaki hai?", "Ramesh Patil ko saadhe teen sau ka saamaan, somvar tak", "haan",
+  "Sunita didi ne 200 cash diye", "Aaj kiska paisa aana hai?", "Sabko reminder bhej do", "galat hai, undo karo"];
+
+// Play one clip at a time so replies and announcements don't talk over each other.
+let queue = Promise.resolve();
+function play(src) {
+  queue = queue.then(() => new Promise((done) => {
+    const a = new Audio(src); a.onended = done; a.onerror = done; a.play().catch(done);
+  }));
+}
+function browserSay(text) {
+  if (!window.speechSynthesis) return;
+  const u = new SpeechSynthesisUtterance(text); u.lang = "hi-IN"; speechSynthesis.speak(u);
+}
+async function say(text, b64) {
+  if (!$("speak").checked) return;
+  if (b64) return play("data:audio/wav;base64," + b64);
+  try {
+    const r = await fetch(`/api/merchants/${$("merchant").value}/tts`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+    if (!r.ok) throw new Error();
+    play(URL.createObjectURL(await r.blob()));
+  } catch { browserSay(text); }  // no Sarvam key: fall back to the browser voice
+}
+function add(box, cls, text, sub) {
+  const d = document.createElement("div"); d.className = "msg " + cls; d.textContent = text;
+  if (sub) { const s = document.createElement("div"); s.className = "muted"; s.textContent = sub; d.appendChild(s); }
+  $(box).prepend(d);
+}
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  const j = await r.json(); if (!r.ok) throw new Error(j.detail || JSON.stringify(j)); return j;
+}
+async function loadMerchants(selectId) {
+  const { merchants } = await api("/demo/merchants");
+  $("merchant").innerHTML = merchants.map(m => `<option value="${m.merchant_id}">${m.name}</option>`).join("");
+  if (selectId) $("merchant").value = selectId;
+  connect();
+}
+function connect() {
+  if (ws) ws.close();
+  const id = $("merchant").value; if (!id) return;
+  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/merchants/${id}/events`);
+  ws.onmessage = (e) => { const ev = JSON.parse(e.data); add("events", "ev " + ev.type, ev.text, ev.type); say(ev.text); };
+}
+function showReply(r) {
+  const tools = r.tool_calls.map(c => c.name).join(", ");
+  add("chat", "bot", r.reply, `${r.outcome}${tools ? " · " + tools : ""} · ${r.latency_ms} ms`);
+  if (r.audio_base64) say(r.reply, r.audio_base64); else if ($("speak").checked) browserSay(r.reply);
+}
+async function send(text) {
+  if (!text) return; add("chat", "me", text); $("text").value = "";
+  try {
+    showReply(await api(`/api/merchants/${$("merchant").value}/agent/message`,
+      { text, session_id: sessionId, speak: $("speak").checked }));
+  } catch (e) { add("chat", "bot", "Error: " + e.message); }
+}
+
+// Push-to-talk: record while held, send the clip to Sarvam STT via the backend.
+let recorder, chunks = [];
+async function startRec() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recorder = new MediaRecorder(stream); chunks = [];
+    recorder.ondataavailable = (e) => chunks.push(e.data);
+    recorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+      if (blob.size < 2000) return;  // a tap, not speech
+      const form = new FormData();
+      form.append("audio", blob, "clip.webm"); form.append("session_id", sessionId);
+      try {
+        const res = await fetch(`/api/merchants/${$("merchant").value}/agent/voice`, { method: "POST", body: form });
+        const r = await res.json(); if (!res.ok) throw new Error(r.detail || res.status);
+        add("chat", "me", r.transcript || "(kuch sunai nahi diya)", "voice"); showReply(r);
+      } catch (e) { add("chat", "bot", "Voice error: " + e.message); }
+    };
+    recorder.start(); $("mic").classList.add("rec"); $("mic").textContent = "Listening... release to send";
+  } catch (e) { add("chat", "bot", "Mic not available: " + e.message); }
+}
+function stopRec() {
+  if (recorder && recorder.state === "recording") recorder.stop();
+  $("mic").classList.remove("rec"); $("mic").textContent = "Hold to talk";
+}
+$("mic").onpointerdown = startRec;
+$("mic").onpointerup = stopRec;
+$("mic").onpointerleave = stopRec;
+$("chips").innerHTML = samples.map(s => `<button>${s}</button>`).join("");
+$("chips").onclick = (e) => { if (e.target.tagName === "BUTTON") send(e.target.textContent); };
+$("send").onclick = () => send($("text").value.trim());
+$("text").onkeydown = (e) => { if (e.key === "Enter") send($("text").value.trim()); };
+$("merchant").onchange = connect;
+$("seed").onclick = async () => { const m = await api("/demo/seed", {}); loadMerchants(m.merchant_id); };
+$("pay").onclick = async () => {
+  try {
+    await api(`/api/merchants/${$("merchant").value}/payments/incoming`, { payer_vpa: $("vpa").value,
+      amount_rupees: Number($("amt").value), note: $("note").value || null });
+  } catch (e) { add("events", "ev upi_unmatched", "Error: " + e.message); }
+};
+loadMerchants();
+</script>
+</body>
+</html>
