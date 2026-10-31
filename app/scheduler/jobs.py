@@ -1,4 +1,4 @@
-"""Scheduled jobs: morning reminders, evening voice summary, nightly balance verification."""
+"""Scheduled jobs: overdue holds, morning reminders, evening voice summary, nightly balance verification."""
 
 import logging
 from datetime import datetime
@@ -27,6 +27,17 @@ def summary_text(s: dict, lang: str = "hi") -> str:
 
 async def _merchants(session) -> list[Merchant]:
     return list((await session.execute(select(Merchant))).scalars())
+
+
+async def daily_holds() -> None:
+    today = datetime.now(get_settings().tz).date()
+    async with get_sessionmaker()() as session:
+        for m in await _merchants(session):
+            held = await ledger.apply_overdue_holds(session, today, m.id)
+            await session.commit()
+            if held:
+                bus.publish(m.id, "holds_placed", t(m.language, "holds_placed", n=len(held)),
+                            customer_ids=[str(c.id) for c in held])
 
 
 async def morning_reminders() -> None:
@@ -62,10 +73,28 @@ async def nightly_verify() -> None:
             log.error("balance drift fixed: %s", fixed)
 
 
+async def dispatch_notifications() -> None:
+    """Every minute: send what quiet hours or a batch window held back."""
+    from app.notify import service as notify
+
+    async with get_sessionmaker()() as session:
+        await notify.dispatch_due(session)
+
+
+async def daily_digest() -> None:
+    from app.notify import service as notify
+
+    async with get_sessionmaker()() as session:
+        await notify.send_digests(session)
+
+
 def build_scheduler() -> AsyncIOScheduler:
     s = get_settings()
     sched = AsyncIOScheduler(timezone=s.tz)
+    sched.add_job(daily_holds, CronTrigger(hour=s.hold_hour, minute=0, timezone=s.tz))
     sched.add_job(morning_reminders, CronTrigger(hour=s.reminder_hour, minute=0, timezone=s.tz))
     sched.add_job(evening_summary, CronTrigger(hour=s.summary_hour, minute=0, timezone=s.tz))
+    sched.add_job(dispatch_notifications, CronTrigger(minute="*", timezone=s.tz))
+    sched.add_job(daily_digest, CronTrigger(hour=s.digest_hour, minute=0, timezone=s.tz))
     sched.add_job(nightly_verify, CronTrigger(hour=2, minute=30, timezone=s.tz))
     return sched

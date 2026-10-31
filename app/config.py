@@ -44,8 +44,21 @@ class Settings(BaseSettings):
     enable_scheduler: bool = False
     reminder_hour: int = 9
     summary_hour: int = 21
+    hold_hour: int = 6  # daily overdue-hold job, before the morning reminders
 
     timezone: str = "Asia/Kolkata"
+
+    # Customer notifications + passbook (plan.md §18)
+    messaging_provider: str = "mock"  # mock | whatsapp_cloud (adapter stub: needs credentials)
+    whatsapp_token: str = ""
+    sms_api_key: str = ""
+    quiet_start_hour: int = 21  # no messages 9 PM to 8 AM; queued, never dropped
+    quiet_end_hour: int = 8
+    batch_minutes: int = 15
+    digest_hour: int = 20
+    public_base_url: str = "http://localhost:8000"  # passbook and pay links in messages
+    otp_ttl_seconds: int = 300
+    passbook_session_hours: int = 24
 
     @property
     def tz(self) -> ZoneInfo:

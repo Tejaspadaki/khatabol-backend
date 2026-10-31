@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Khata Bol · Meri Passbook</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f6fa; --card: #ffffff; --ink: #1c2430; --muted: #667085; --line: #e2e6ee;
+    --brand: #00baf2; --brand-dark: #002e6e; --danger: #dc2626; --danger-soft: #fdecec;
+    --warn: #b45309; --warn-soft: #fef3c7; --ok: #047857; --ok-soft: #e3f8ef;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { background: var(--brand-dark); color: #fff; padding: 12px 16px; font-weight: 700; }
+  main { max-width: 560px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 8px; }
+  input, button, select { font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); }
+  button { background: var(--brand); color: #fff; border: 0; font-weight: 600; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--brand-dark); border: 1px solid var(--line); }
+  .muted { color: var(--muted); font-size: 13px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .big { font-size: 26px; font-weight: 800; }
+  .badge { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+  .OPEN { background: var(--danger-soft); color: var(--danger); } .PARTIAL { background: var(--warn-soft); color: var(--warn); }
+  .PAID { background: var(--ok-soft); color: var(--ok); } .REVERSED { background: var(--bg); color: var(--muted); }
+  .entry { border-top: 1px solid var(--line); padding-top: 8px; display: grid; gap: 4px; }
+  .err { color: var(--danger); }
+  a.pay { display: inline-block; background: var(--ok); color: #fff; padding: 10px 14px; border-radius: 8px; text-decoration: none; font-weight: 700; }
+</style>
+</head>
+<body>
+<header>Khata Bol · Meri Passbook</header>
+<main id="app">
+  <section class="card" id="login">
+    <div><b>Apna phone number daalein</b><div class="muted">Hum SMS par ek code bhejenge. Koi app nahi chahiye.</div></div>
+    <input id="phone" inputmode="tel" placeholder="98220 01234" autocomplete="tel">
+    <button id="send">Code bhejein</button>
+    <div id="codeBox" hidden class="row">
+      <input id="code" inputmode="numeric" maxlength="6" placeholder="6 digit code" style="flex:1">
+      <button id="verify">Login</button>
+    </div>
+    <div id="loginErr" class="err"></div>
+  </section>
+  <section id="book" hidden></section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let token = sessionStorage.getItem("pb_token");
+
+async function api(path, opts = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = "Bearer " + token;
+  const r = await fetch(path, { ...opts, headers });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || ("Error " + r.status));
+  return body;
+}
+
+$("send").onclick = async () => {
+  $("loginErr").textContent = "";
+  try { await api("/api/passbook/otp", { method: "POST", body: JSON.stringify({ phone: $("phone").value }) });
+        $("codeBox").hidden = false; $("code").focus(); }
+  catch (e) { $("loginErr").textContent = e.message; }
+};
+
+$("verify").onclick = async () => {
+  $("loginErr").textContent = "";
+  try {
+    const r = await api("/api/passbook/login", { method: "POST",
+      body: JSON.stringify({ phone: $("phone").value, code: $("code").value }) });
+    token = r.token; sessionStorage.setItem("pb_token", token); load();
+  } catch (e) { $("loginErr").textContent = e.message; }
+};
+
+const STATUS = { OPEN: "Baaki", PARTIAL: "Thoda chukaya", PAID: "Chukta", REVERSED: "Cancel" };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function load() {
+  let pb;
+  try { pb = await api("/api/passbook"); }
+  catch (e) { token = null; sessionStorage.removeItem("pb_token"); $("login").hidden = false; $("book").hidden = true; return; }
+  $("login").hidden = true; $("book").hidden = false;
+  $("book").innerHTML = `
+    <div class="card"><div class="muted">${esc(pb.name || "")} · ${esc(pb.phone)}</div>
+      <div>Kul baaki (sab dukaanein)</div><div class="big">${esc(pb.total_due)}</div>
+      <div class="muted">Khata Points: <b>${esc(pb.points)}</b></div>
+      <button class="ghost" id="logout">Logout</button></div>` +
+    pb.shops.map((s) => `
+    <div class="card">
+      <div class="row" style="justify-content:space-between"><b>${esc(s.shop)}</b><span class="big" style="font-size:20px">${esc(s.balance)}</span></div>
+      <div class="muted">Points: ${esc(s.points)}</div>
+      ${s.pay_link ? `<div><a class="pay" href="${esc(s.pay_link)}">Pay karein (UPI)</a></div>` : ""}
+      <label class="muted">Messages: <select data-pref="${esc(s.merchant_id)}">
+        ${["instant", "digest", "off"].map((m) => `<option value="${m}" ${m === s.notify_pref ? "selected" : ""}>${
+          { instant: "Har entry par", digest: "Din mein ek baar", off: "Band" }[m]}</option>`).join("")}
+      </select></label>
+      ${s.entries.map((e) => `
+        <div class="entry">
+          <div class="row"><b>${esc(e.type === "CREDIT" ? "Udhaar" : e.type === "PAYMENT" ? "Payment" : e.type === "ADJUSTMENT" ? "Chhoot" : "Cancel")} ${esc(e.amount)}</b>
+            ${e.status ? `<span class="badge ${esc(e.status)}">${esc(STATUS[e.status])}${e.status === "PARTIAL" ? " · " + esc(e.remaining) + " baaki" : ""}</span>` : ""}
+            ${e.disputed ? `<span class="badge OPEN">Shikayat khuli</span>` : ""}</div>
+          <div class="muted">${esc((e.at || "").slice(0, 10))}${e.items ? " · " + esc(e.items) : ""}${e.due_date ? " · due " + esc(e.due_date) : ""}</div>
+          ${e.type !== "REVERSAL" && !e.disputed ? `<div><button class="ghost" data-dispute="${esc(e.entry_id)}">Galat hai</button></div>` : ""}
+        </div>`).join("")}
+    </div>`).join("");
+  $("logout").onclick = () => { sessionStorage.removeItem("pb_token"); token = null; location.reload(); };
+  document.querySelectorAll("[data-dispute]").forEach((b) => b.onclick = async () => {
+    const reason = prompt("Kya galat hai? (optional)") ?? "";
+    try { await api("/api/passbook/disputes", { method: "POST", body: JSON.stringify({ entry_id: b.dataset.dispute, reason }) }); load(); }
+    catch (e) { alert(e.message); }
+  });
+  document.querySelectorAll("[data-pref]").forEach((sel) => sel.onchange = () =>
+    api("/api/passbook/prefs", { method: "POST", body: JSON.stringify({ merchant_id: sel.dataset.pref, mode: sel.value }) }));
+}
+
+if (token) load();
+</script>
+</body>
+</html>

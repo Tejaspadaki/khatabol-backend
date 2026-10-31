@@ -145,6 +145,51 @@ const E = [
       "Sabko reminder bhej do", "galat hai, undo karo", "Ramesh ko 500 diye"] },
     { n: "session_id", in: "body", v: "tester" },
     { n: "speak", in: "body", type: "bool", v: false } ], after: "customers" },
+  { g: "Agent", m: "POST", p: "/api/merchants/{merchant_id}/agent/propose", d: "One-tap partial-payment nudge (no LLM). Creates a pending reminder; send 'haan' on agent/message with the same session_id.", f: [
+    { n: "tool", in: "body", req: 1, type: "select", options: ["send_partial_nudge"], v: "send_partial_nudge" },
+    { n: "args", in: "body", req: 1, type: "json", v: '{"customer": "Ramesh Patil"}' },
+    { n: "session_id", in: "body", v: "tester" } ], after: "customers" },
+  { g: "Family", m: "GET", p: "/api/merchants/{merchant_id}/families", d: "Family khatas with totals.", f: [] },
+  { g: "Family", m: "GET", p: "/api/merchants/{merchant_id}/families/{family_id}", d: "Family total + per-member breakdown.", f: [
+    { n: "family_id", in: "path", req: 1, v: "" } ] },
+  { g: "Family", m: "GET", p: "/api/merchants/{merchant_id}/families/{family_id}/qr", d: "Dynamic pay QR content (due amount + family ref).", f: [
+    { n: "family_id", in: "path", req: 1, v: "" } ] },
+  { g: "Notify", m: "GET", p: "/api/merchants/{merchant_id}/notifications", d: "Messages to customers (WhatsApp, SMS fallback) with delivery status.", f: [
+    { n: "customer_id", in: "query", v: "" } ] },
+  { g: "Notify", m: "GET", p: "/api/merchants/{merchant_id}/disputes", d: "'Galat hai' disputes. Open ones pause reminders for that entry.", f: [
+    { n: "status", in: "query", type: "select", options: ["OPEN", "CONFIRMED", "EDITED"], v: "OPEN" } ] },
+  { g: "Notify", m: "POST", p: "/api/merchants/{merchant_id}/disputes/{dispute_id}/confirm", d: "The entry is right: close the dispute, customer told.", f: [
+    { n: "dispute_id", in: "path", req: 1, v: "" },
+    { n: "note", in: "body", v: "" } ] },
+  { g: "Passbook", m: "POST", p: "/api/passbook/otp", d: "Customer: send a login code by SMS.", f: [
+    { n: "phone", in: "body", req: 1, v: "9822001234" } ] },
+  { g: "Passbook", m: "POST", p: "/api/passbook/login", d: "Customer: log in with the code; returns a token.", f: [
+    { n: "phone", in: "body", req: 1, v: "9822001234" }, { n: "code", in: "body", req: 1, v: "" } ] },
+  { g: "Passbook", m: "GET", p: "/api/passbook", d: "Customer: my khatas (needs Authorization: Bearer <token>).", f: [] },
+  { g: "Passbook", m: "POST", p: "/api/passbook/disputes", d: "Customer: 'Galat hai' on one of my entries.", f: [
+    { n: "entry_id", in: "body", req: 1, v: "" }, { n: "reason", in: "body", v: "" } ] },
+  { g: "Passbook", m: "POST", p: "/api/passbook/prefs", d: "Customer: instant, digest or off, per shop.", f: [
+    { n: "merchant_id", in: "body", req: 1, v: "" },
+    { n: "mode", in: "body", type: "select", options: ["instant", "digest", "off"], v: "digest" } ] },
+  { g: "Passbook", m: "POST", p: "/api/notify/inbound", d: "Customer reply webhook (mock). STOP opts out.", f: [
+    { n: "phone", in: "body", req: 1, v: "9822001234" }, { n: "text", in: "body", req: 1, v: "STOP" } ] },
+  { g: "Edits", m: "POST", p: "/api/merchants/{merchant_id}/staff", d: "Add a staff member (owner or staff). Staff edits need owner approval.", f: [
+    { n: "name", in: "body", req: 1, v: "Raju" },
+    { n: "role", in: "body", type: "select", options: ["staff", "owner"], v: "staff" } ] },
+  { g: "Edits", m: "GET", p: "/api/merchants/{merchant_id}/approvals", d: "Staff edits waiting for the owner.", f: [] },
+  { g: "Edits", m: "POST", p: "/api/merchants/{merchant_id}/approvals/{action_id}/approve", d: "Owner approves a staff edit.", f: [
+    { n: "action_id", in: "path", req: 1, v: "" } ] },
+  { g: "Edits", m: "POST", p: "/api/merchants/{merchant_id}/approvals/{action_id}/reject", d: "Owner rejects a staff edit.", f: [
+    { n: "action_id", in: "path", req: 1, v: "" } ] },
+  { g: "Edits", m: "GET", p: "/api/merchants/{merchant_id}/entries/{entry_id}/edits", d: "Edit history of an entry (old → new, who, when).", f: [
+    { n: "entry_id", in: "path", req: 1, v: "" } ] },
+  { g: "Edits", m: "GET", p: "/api/merchants/{merchant_id}/customers/{customer_id}/edits", d: "All edits on a customer's khata.", f: [
+    { n: "customer_id", in: "path", type: "customer", req: 1, v: "" } ] },
+  { g: "Agent", m: "GET", p: "/api/merchants/{merchant_id}/risk", d: "Trust Score + UPI Udhaar Check: level, suggested amount, reasons. Advice only.", f: [
+    { n: "vpa", in: "query", v: "rahul99@ybl" },
+    { n: "customer_id", in: "query", v: "" },
+    { n: "name", in: "query", v: "" },
+    { n: "amount_rupees", in: "query", type: "number", v: 1000 } ], after: "customers" },
   { g: "Agent", m: "POST", p: "/api/merchants/{merchant_id}/agent/voice", d: "Voice turn: Sarvam STT → agent → Sarvam TTS. Record with the mic or pick an audio file.", f: [
     { n: "audio", in: "file", req: 1 },
     { n: "session_id", in: "form", v: "tester-voice" } ], after: "customers" },

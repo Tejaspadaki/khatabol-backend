@@ -7,10 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import agent, collections, customers, merchants, payments, ws
+from app.api import (
+    agent, collections, customers, families, merchants, notifications, passbook, payments, risk, staff, ws,
+)
 from app.config import get_settings
 from app.i18n import lang_of
-from app.db.base import create_all
+from app.db.base import get_engine
+from app.db.migrate import upgrade_to_head
 from app.demo import routes as demo
 from app.ledger.errors import LedgerError, NotFoundError
 
@@ -19,8 +22,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Hackathon: create tables on boot. Move to Alembic migrations before real data.
-    await create_all()
+    # Bring the schema to the latest Alembic revision (stamps pre-migration databases at the baseline first).
+    await upgrade_to_head(get_engine())
     scheduler = None
     if get_settings().enable_scheduler:
         from app.scheduler.jobs import build_scheduler
@@ -39,7 +42,8 @@ app = FastAPI(title="Khata Voice", version="0.1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 for r in (merchants.router, customers.router, agent.router, collections.router,
-          payments.router, ws.router, demo.router):
+          payments.router, risk.router, staff.router, notifications.router, passbook.router, families.router, ws.router,
+          demo.router):
     app.include_router(r)
 
 # Voice clips are the proof attached to each khata entry (voice_logs.audio_url).
@@ -51,8 +55,11 @@ app.mount("/voice-clips", StaticFiles(directory=_clips), name="voice-clips")
 @app.exception_handler(LedgerError)
 async def ledger_error(request: Request, exc: LedgerError):
     """The app sends the shop's language as Accept-Language; errors come back in it."""
+    from app.notify.passbook import PassbookAuthError
+
     detail = exc.text(lang_of(request.headers.get("accept-language")))
-    return JSONResponse({"detail": detail}, status_code=404 if isinstance(exc, NotFoundError) else 400)
+    code = 404 if isinstance(exc, NotFoundError) else 401 if isinstance(exc, PassbookAuthError) else 400
+    return JSONResponse({"detail": detail}, status_code=code)
 
 
 _WEB_APP = Path(__file__).parent / "web" / "index.html"

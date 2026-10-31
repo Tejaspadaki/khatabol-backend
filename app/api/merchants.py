@@ -20,6 +20,7 @@ def merchant_out(m: Merchant) -> dict:
         "upi_vpa": m.upi_vpa,
         "language": m.language,
         "large_amount_threshold": format_rupees(m.large_amount_threshold_paise),
+        "hold_grace_days": m.hold_grace_days,
     }
 
 
@@ -48,7 +49,7 @@ async def update_merchant(merchant_id: uuid.UUID, body: MerchantUpdate, session:
         if threshold is not None:
             m.large_amount_threshold_paise = rupees_to_paise(threshold)
     for key, value in fields.items():
-        if key in ("name", "language") and value is None:
+        if key in ("name", "language", "hold_grace_days") and value is None:
             continue
         setattr(m, key, value)
     await session.commit()

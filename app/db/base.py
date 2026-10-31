@@ -35,6 +35,10 @@ def _sqlite_pragmas(dbapi_conn, _record) -> None:
     cur.close()
 
 
+def get_engine() -> AsyncEngine:
+    return _engine or init_engine()
+
+
 def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
     if _sessionmaker is None:
         init_engine()

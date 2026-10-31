@@ -11,6 +11,15 @@ from app.ledger import service as ledger
 from app.voice.sarvam import SpeechUnavailable, Transcript
 
 
+@pytest.fixture(autouse=True)
+def _clean_outbox():
+    from app.notify.providers import reset_mock
+
+    reset_mock()
+    yield
+    reset_mock()
+
+
 @pytest.fixture
 async def db(tmp_path):
     base.init_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
@@ -22,6 +31,7 @@ async def db(tmp_path):
 @pytest.fixture
 async def session(db):
     async with base.get_sessionmaker()() as s:
+        s.info["allow_backdate"] = True  # tests back-date created_at to build histories; nothing else may change
         yield s
 
 

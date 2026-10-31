@@ -21,7 +21,7 @@ async def test_SYS_02_root_redirects_to_app(client):
 
 async def test_SYS_03_openapi_lists_every_route(client):
     paths = (await client.get("/openapi.json")).json()["paths"]
-    assert len(paths) == 24  # 25 operations; /customers has GET and POST
+    assert len(paths) == 44  # 46 operations; /customers and /staff have GET and POST
     assert "/api/merchants/{merchant_id}/payments/incoming" in paths
     assert not any("webhook" in p for p in paths)
 

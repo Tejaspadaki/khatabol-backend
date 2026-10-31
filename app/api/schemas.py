@@ -20,6 +20,7 @@ class MerchantUpdate(BaseModel):
     upi_vpa: str | None = None
     language: Literal["hi", "mr", "en"] | None = None
     large_amount_threshold_rupees: float | None = Field(None, gt=0)
+    hold_grace_days: int | None = Field(None, ge=0, le=365, description="Overdue days before the daily hold")
 
 
 class CustomerIn(BaseModel):
@@ -48,7 +49,52 @@ class UpiLinkIn(BaseModel):
 class AgentMessageIn(BaseModel):
     text: str = Field(min_length=1, max_length=1000)
     session_id: str | None = Field(None, max_length=64)
+    staff_id: uuid.UUID | None = Field(None, description="Who is speaking; omit for the owner")
     speak: bool = Field(False, description="Also return the reply as Sarvam TTS audio")
+
+
+class AgentProposeIn(BaseModel):
+    """A write proposed by a button in the app. Only tools meant for one-tap use are allowed."""
+
+    tool: Literal["send_partial_nudge", "edit_entry", "waive_amount", "create_family", "add_member", "remove_member",
+                  "merge_families"]
+    args: dict = {}
+    session_id: str | None = Field(None, max_length=64)
+    staff_id: uuid.UUID | None = None
+    speak: bool = False
+
+
+class StaffIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    role: Literal["owner", "staff"] = "staff"
+
+
+class DisputeConfirmIn(BaseModel):
+    note: str | None = Field(None, max_length=500)
+
+
+class OtpIn(BaseModel):
+    phone: str = Field(min_length=10, max_length=20)
+
+
+class PassbookLoginIn(BaseModel):
+    phone: str = Field(min_length=10, max_length=20)
+    code: str = Field(min_length=4, max_length=8)
+
+
+class PassbookDisputeIn(BaseModel):
+    entry_id: uuid.UUID
+    reason: str | None = Field(None, max_length=500)
+
+
+class PassbookPrefIn(BaseModel):
+    merchant_id: uuid.UUID
+    mode: Literal["instant", "digest", "off"]
+
+
+class InboundMessageIn(BaseModel):
+    phone: str = Field(min_length=10, max_length=20)
+    text: str = Field(max_length=1000)
 
 
 class TtsIn(BaseModel):

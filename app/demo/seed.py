@@ -17,8 +17,13 @@ async def seed_demo(session: AsyncSession) -> Merchant:
     m = await ledger.create_merchant(session, "Sharma General Store", "9876500000", "sharmastore@paytm")
 
     async def backdate(entry, days_ago: int):
-        entry.created_at = now - timedelta(days=days_ago)
-        await session.flush()
+        # Demo history only: the append-only guard lets created_at (and nothing else) be back-dated here.
+        session.info["allow_backdate"] = True
+        try:
+            entry.created_at = now - timedelta(days=days_ago)
+            await session.flush()
+        finally:
+            session.info.pop("allow_backdate", None)
 
     ramesh_p = await ledger.create_customer(session, m.id, "Ramesh Patil", "9822001234")
     ramesh_s = await ledger.create_customer(session, m.id, "Ramesh Sharma", "9822005678")

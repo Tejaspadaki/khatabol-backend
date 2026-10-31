@@ -5,12 +5,14 @@ import uuid
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.tools import customer_card, entry_card
+from app.agent.tools import credit_card, customer_card, entry_card
 from app.api.deps import get_session, today_ist
 from app.api.schemas import CreditIn, CustomerIn, PaymentIn, UpiLinkIn
 from app.db.models import EntrySource, PaymentMode
 from app.ledger import service as ledger
 from app.ledger.errors import LedgerError
+from app.notify import service as notify
+from app.risk import trust_score
 from app.nlp.dates import resolve_due_date
 from app.nlp.hinglish_numbers import format_rupees, rupees_to_paise
 
@@ -44,6 +46,7 @@ async def create_customer(merchant_id: uuid.UUID, body: CustomerIn, session: Asy
 async def get_customer(merchant_id: uuid.UUID, customer_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
     b = await ledger.get_balance(session, merchant_id, customer_id, today_ist())
     c, lp = b["customer"], b["last_payment"]
+    merchant = await ledger.get_merchant(session, merchant_id)
     return {
         **customer_card(c),
         "ref_code": c.ref_code,
@@ -52,6 +55,8 @@ async def get_customer(merchant_id: uuid.UUID, customer_id: uuid.UUID, session: 
         "next_due": format_rupees(b["next_due_paise"]) if b["next_due_date"] else None,
         "overdue": format_rupees(b["overdue_paise"]),
         "last_payment": entry_card(lp, c.name) if lp else None,
+        "credit": credit_card(c),
+        "trust_score": trust_score.risk_card(await trust_score.assess(session, merchant, today_ist(), customer=c)),
     }
 
 
@@ -61,7 +66,8 @@ async def history(
     session: AsyncSession = Depends(get_session),
 ):
     entries = await ledger.get_history(session, merchant_id, customer_id, limit)
-    return {"entries": [entry_card(e) for e in entries]}
+    st = await ledger.entry_statuses(session, customer_id)
+    return {"entries": [entry_card(e, status=st.get(e.id)) for e in entries]}
 
 
 @router.post("/customers/{customer_id}/credit", status_code=201)
@@ -76,7 +82,7 @@ async def add_credit(
     e = await ledger.add_credit(session, merchant_id, customer_id, rupees_to_paise(body.amount_rupees), due,
                                 body.items, body.note, EntrySource.MANUAL)
     c = await ledger.get_customer(session, merchant_id, customer_id)
-    await session.commit()
+    await notify.commit(session)
     return {"entry": entry_card(e, c.name), "customer": customer_card(c)}
 
 
@@ -87,7 +93,7 @@ async def record_payment(
     e = await ledger.record_payment(session, merchant_id, customer_id, rupees_to_paise(body.amount_rupees),
                                     PaymentMode(body.mode.upper()), EntrySource.MANUAL, note=body.note)
     c = await ledger.get_customer(session, merchant_id, customer_id)
-    await session.commit()
+    await notify.commit(session)
     return {"entry": entry_card(e, c.name), "customer": customer_card(c)}
 
 
@@ -96,7 +102,7 @@ async def link_upi(
     merchant_id: uuid.UUID, customer_id: uuid.UUID, body: UpiLinkIn, session: AsyncSession = Depends(get_session)
 ):
     h = await ledger.link_upi(session, merchant_id, customer_id, body.vpa, linked_via="manual", verified=True)
-    await session.commit()
+    await notify.commit(session)
     return {"customer_id": str(customer_id), "vpa": h.vpa}
 
 
@@ -104,5 +110,5 @@ async def link_upi(
 async def reverse_entry(merchant_id: uuid.UUID, entry_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
     e = await ledger.reverse_entry(session, merchant_id, entry_id, note="reversed from app", source=EntrySource.MANUAL)
     c = await ledger.get_customer(session, merchant_id, e.customer_id)
-    await session.commit()
+    await notify.commit(session)
     return {"entry": entry_card(e, c.name), "customer": customer_card(c)}

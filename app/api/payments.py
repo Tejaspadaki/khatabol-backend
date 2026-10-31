@@ -15,6 +15,7 @@ from app.agent.tools import customer_card
 from app.api.deps import get_session
 from app.api.schemas import AssignIn, IncomingPaymentIn
 from app.ledger import service as ledger
+from app.notify import service as notify
 from app.nlp.hinglish_numbers import format_rupees, rupees_to_paise
 from app.payments import reconciler
 from app.speech import balance_phrase
@@ -49,7 +50,7 @@ async def incoming_payment(merchant_id: uuid.UUID, body: IncomingPaymentIn,
         note=body.note,
     )
     result = await reconciler.handle_payment(session, event)
-    await session.commit()
+    await notify.commit(session)
     result.publish()
     return {"duplicate": result.duplicate, "announcement": result.announcement, **_txn_out(result.txn)}
 
@@ -62,7 +63,7 @@ async def unmatched(merchant_id: uuid.UUID, session: AsyncSession = Depends(get_
 @router.post("/{txn_id}/assign")
 async def assign(merchant_id: uuid.UUID, txn_id: str, body: AssignIn, session: AsyncSession = Depends(get_session)):
     txn, c = await reconciler.assign_payment(session, merchant_id, txn_id, body.customer_id)
-    await session.commit()
+    await notify.commit(session)
     lang = (await ledger.get_merchant(session, merchant_id)).language
     return {
         **_txn_out(txn),
@@ -76,5 +77,5 @@ async def assign(merchant_id: uuid.UUID, txn_id: str, body: AssignIn, session: A
 async def undo(merchant_id: uuid.UUID, txn_id: str, session: AsyncSession = Depends(get_session)):
     """'Ye Ramesh ka nahi tha': reverse the auto-settlement and ask again."""
     txn = await reconciler.undo_auto_payment(session, merchant_id, txn_id)
-    await session.commit()
+    await notify.commit(session)
     return _txn_out(txn)

@@ -11,8 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.orchestrator import Orchestrator, TurnResult
 from app.api.deps import get_orchestrator, get_sarvam, get_session
-from app.api.schemas import AgentMessageIn, TtsIn
+from app.api.schemas import AgentMessageIn, AgentProposeIn, TtsIn
 from app.config import get_settings
+from app.ledger import edits
 from app.ledger import service as ledger
 from app.voice.sarvam import SarvamClient, SpeechUnavailable
 
@@ -44,7 +45,27 @@ async def agent_message(
     sarvam: SarvamClient = Depends(get_sarvam),
 ):
     """Text-mode agent turn. Set speak=true to also get the reply as Sarvam TTS audio."""
-    result = await orchestrator.handle_text(session, merchant_id, body.text, body.session_id)
+    actor = await edits.actor_for(session, merchant_id, body.staff_id)
+    result = await orchestrator.handle_text(session, merchant_id, body.text, body.session_id, actor=actor)
+    out = _out(result)
+    if body.speak:
+        merchant = await ledger.get_merchant(session, merchant_id)
+        out |= await _speak(sarvam, result.reply, merchant.language)
+    return out
+
+
+@router.post("/agent/propose")
+async def agent_propose(
+    merchant_id: uuid.UUID,
+    body: AgentProposeIn,
+    session: AsyncSession = Depends(get_session),
+    orchestrator: Orchestrator = Depends(get_orchestrator),
+    sarvam: SarvamClient = Depends(get_sarvam),
+):
+    """One-tap write from the app (the partial-payment nudge). Creates a pending action only; answer
+    "haan" on /agent/message with the same session_id to commit it."""
+    actor = await edits.actor_for(session, merchant_id, body.staff_id)
+    result = await orchestrator.propose(session, merchant_id, body.tool, body.args, body.session_id, actor=actor)
     out = _out(result)
     if body.speak:
         merchant = await ledger.get_merchant(session, merchant_id)
@@ -57,12 +78,14 @@ async def agent_voice(
     merchant_id: uuid.UUID,
     audio: UploadFile = File(..., description="Push-to-talk clip: webm, wav, mp3, ogg..."),
     session_id: str | None = Form(None),
+    staff_id: uuid.UUID | None = Form(None),
     session: AsyncSession = Depends(get_session),
     orchestrator: Orchestrator = Depends(get_orchestrator),
     sarvam: SarvamClient = Depends(get_sarvam),
 ):
     """Voice turn: Sarvam STT -> agent -> Sarvam TTS. The clip is kept as proof for the khata entry."""
     merchant = await ledger.get_merchant(session, merchant_id)
+    actor = await edits.actor_for(session, merchant_id, staff_id)
     data = await audio.read()
     if not data:
         raise HTTPException(400, "empty audio")
@@ -83,7 +106,7 @@ async def agent_voice(
         raise HTTPException(503, f"Speech-to-text unavailable: {exc}") from exc
 
     result = await orchestrator.handle_text(
-        session, merchant_id, transcript.text, session_id, audio_url=f"/voice-clips/{clip_name}",
+        session, merchant_id, transcript.text, session_id, audio_url=f"/voice-clips/{clip_name}", actor=actor,
     )
     return {"transcript": transcript.text, "stt_language": transcript.language_code, **_out(result),
             **await _speak(sarvam, result.reply, merchant.language)}

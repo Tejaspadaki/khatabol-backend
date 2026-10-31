@@ -15,11 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent import pending as gate
 from app.agent.llm import LLMClient, LLMUnavailable
 from app.agent.prompts import system_prompt, user_turn
-from app.agent.tools import TOOL_SCHEMAS, WRITE_TOOLS, ToolContext, active_pending, execute_tool, to_json
+from app.agent.tools import (
+    DIRECT_TOOLS, TOOL_SCHEMAS, WRITE_TOOLS, ToolContext, active_pending, execute_tool, to_json,
+)
 from app.config import get_settings
 from app.db.models import VoiceLog
 from app.i18n import t
 from app.ledger import service as ledger
+from app.notify import service as notify
 from app.ledger.errors import LedgerError
 from app.nlp.confirm import classify_confirmation, classify_goodbye
 from app.nlp.hinglish_numbers import normalize_amounts
@@ -86,6 +89,39 @@ class Orchestrator:
         self.llm = llm
         self.history = history or HistoryStore()
 
+    async def propose(
+        self, session: AsyncSession, merchant_id: uuid.UUID, tool: str, args: dict,
+        session_id: str | None = None, now: datetime | None = None, actor: str = "owner",
+    ) -> TurnResult:
+        """A button in the app proposes a write (e.g. the partial-payment nudge) without the LLM.
+
+        Same tool layer and same gate: this only creates the pending action; the merchant's "haan"
+        on /agent/message commits it.
+        """
+        if tool not in DIRECT_TOOLS:
+            raise LedgerError(f"{tool} can't be proposed directly.")
+        started = time.monotonic()
+        settings = get_settings()
+        session_id = session_id or "default"
+        merchant = await ledger.get_merchant(session, merchant_id)
+        today = (now or datetime.now(settings.tz)).astimezone(settings.tz).date()
+        vlog = VoiceLog(merchant_id=merchant.id, session_id=session_id, transcript=f"[app] {tool}")
+        session.add(vlog)
+        await session.flush()
+        ctx = ToolContext(session, merchant, session_id, today, vlog.id, actor=actor)
+        result = TurnResult(reply="", session_id=session_id, voice_log_id=vlog.id, outcome="")
+        call = {"name": tool, "input": args}
+        try:
+            await execute_tool(ctx, tool, args)
+            call["ok"] = True
+            result.reply, result.outcome = _readback(ctx.proposed, merchant.language), "awaiting_confirmation"
+            result.pending = [self._card(p) for p in ctx.proposed]
+        except LedgerError as exc:
+            call["ok"], call["error"] = False, str(exc)
+            result.reply, result.outcome = exc.text(merchant.language), "write_failed"
+        result.tool_calls.append(call)
+        return await self._finish(session, vlog, result, started)
+
     async def handle_text(
         self,
         session: AsyncSession,
@@ -95,6 +131,7 @@ class Orchestrator:
         stt_confidence: float | None = None,
         audio_url: str | None = None,
         now: datetime | None = None,
+        actor: str = "owner",
     ) -> TurnResult:
         started = time.monotonic()
         settings = get_settings()
@@ -108,7 +145,7 @@ class Orchestrator:
                         stt_confidence=stt_confidence, audio_url=audio_url)
         session.add(vlog)
         await session.flush()
-        ctx = ToolContext(session, merchant, session_id, today, vlog.id)
+        ctx = ToolContext(session, merchant, session_id, today, vlog.id, actor=actor)
         result = TurnResult(reply="", session_id=session_id, voice_log_id=vlog.id, outcome="")
 
         if not text or (stt_confidence is not None and stt_confidence < LOW_CONFIDENCE):
@@ -217,7 +254,9 @@ class Orchestrator:
     @staticmethod
     def _card(p) -> dict:
         return {"action_id": str(p.id), "tool": p.tool, "summary": p.summary,
-                "needs_double_confirmation": p.confirmations_needed > 1}
+                "needs_double_confirmation": p.confirmations_needed > 1,
+                "credit_warning": (p.args or {}).get("credit_warning"),
+                "trust_score": (p.args or {}).get("trust_score")}
 
     @staticmethod
     async def _finish(session: AsyncSession, vlog: VoiceLog, result: TurnResult, started: float) -> TurnResult:
@@ -226,5 +265,5 @@ class Orchestrator:
         vlog.outcome = result.outcome
         vlog.llm_tool_calls = result.tool_calls
         vlog.latency_ms = result.latency_ms
-        await session.commit()
+        await notify.commit(session)
         return result

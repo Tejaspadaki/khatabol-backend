@@ -104,7 +104,8 @@ async def handle_payment(session: AsyncSession, event: PaymentEvent) -> Reconcil
     lang = (await ledger.get_merchant(session, event.merchant_id)).language
     if customer is not None:
         txn.customer_id = customer.id
-        if customer.balance_paise > 0:
+        account = await ledger.khata_account(session, customer)  # a family member pays the family khata (§17)
+        if account.balance_paise > 0:
             entry = await ledger.record_payment(
                 session,
                 event.merchant_id,
@@ -117,7 +118,7 @@ async def handle_payment(session: AsyncSession, event: PaymentEvent) -> Reconcil
             )
             txn.status = UpiTxnStatus.APPLIED
             txn.ledger_entry_id = entry.id
-            balance = balance_phrase(customer.balance_paise, lang).capitalize()
+            balance = balance_phrase(account.balance_paise, lang).capitalize()
             text = t(lang, "upi_applied", name=customer.name, amount=amount, balance=balance)
             await session.flush()
             return ReconcileResult(txn, False, text, "upi_applied", customer)
