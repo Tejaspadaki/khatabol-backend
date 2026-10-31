@@ -65,8 +65,22 @@ async def ledger_error(request: Request, exc: LedgerError):
 _WEB_APP = Path(__file__).parent / "web" / "index.html"
 
 
+_DIST = Path(get_settings().web_dist_dir).resolve()
+_DIST_INDEX = _DIST / "index.html"
+# Paths that belong to the API: an unknown one is a real 404, never the web app.
+_API_PREFIXES = ("api/", "ws/", "demo/", "voice-clips/", "docs", "redoc", "openapi.json", "health")
+
+if _DIST_INDEX.exists():
+    for sub in ("_expo", "assets"):
+        if (_DIST / sub).is_dir():
+            app.mount(f"/{sub}", StaticFiles(directory=_DIST / sub), name=f"web-{sub}")
+
+
 @app.get("/", include_in_schema=False)
 async def root():
+    """The Expo app when it has been built (see web_dist_dir), else the bundled single-page app."""
+    if _DIST_INDEX.exists():
+        return FileResponse(_DIST_INDEX, media_type="text/html")
     return RedirectResponse("/app")
 
 
@@ -79,3 +93,14 @@ async def web_app():
 @app.get("/health")
 async def health():
     return {"ok": True}
+
+
+@app.get("/{path:path}", include_in_schema=False)
+async def web_app_routes(path: str):
+    """Expo Router deep links (/customer/123, /family/abc, /home ...) load the web app; registered last."""
+    if path.startswith(_API_PREFIXES) or not _DIST_INDEX.exists():
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    file = (_DIST / path).resolve()
+    if file.is_file() and _DIST in file.parents:  # favicon.ico, metadata.json ...
+        return FileResponse(file)
+    return FileResponse(_DIST_INDEX, media_type="text/html")

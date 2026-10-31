@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from fastapi import Request
 
-from app.agent.llm import GroqLLM
+from app.agent.llm import make_llm
 from app.agent.orchestrator import Orchestrator
 from app.config import get_settings
 from app.db.base import get_session  # noqa: F401  (re-exported for routers)
@@ -17,7 +17,7 @@ def get_orchestrator(request: Request) -> Orchestrator:
     """Created on first use so the API runs (ledger, payments) without an LLM key."""
     orch = getattr(request.app.state, "orchestrator", None)
     if orch is None:
-        orch = Orchestrator(GroqLLM())
+        orch = Orchestrator(make_llm())
         request.app.state.orchestrator = orch
     return orch
 

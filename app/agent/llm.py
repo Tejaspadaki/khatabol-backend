@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 import groq
+import httpx
 from groq import AsyncGroq
 
 from app.config import get_settings
@@ -112,10 +113,93 @@ class GroqLLM:
             for tc in (msg.tool_calls or [])
         ]
         content = _THINK.sub("", msg.content or "").strip()  # in case reasoning leaks into content
-        message: dict = {"role": "assistant", "content": content}
-        if calls:
-            message["tool_calls"] = [
-                {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.raw_arguments or "{}"}}
-                for c in calls
-            ]
-        return LLMTurn(text=content, tool_calls=calls, message=message)
+        return _turn(content, calls)
+
+
+def _turn(content: str, calls: list[ToolCall]) -> LLMTurn:
+    message: dict = {"role": "assistant", "content": content}
+    if calls:
+        message["tool_calls"] = [
+            {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.raw_arguments or "{}"}}
+            for c in calls
+        ]
+    return LLMTurn(text=content, tool_calls=calls, message=message)
+
+
+class Gemma4LLM:
+    """Gemma 4 behind an OpenAI-compatible /chat/completions endpoint (GEMMA4_BASE_URL)."""
+
+    def __init__(self, client: httpx.AsyncClient | None = None) -> None:
+        s = get_settings()
+        self.model = s.gemma4_model
+        self.temperature = s.llm_temperature
+        self.max_tokens = s.llm_max_tokens
+        self._base_url = s.gemma4_base_url.rstrip("/")
+        self._api_key = s.gemma4_api_key
+        self._timeout = s.gemma4_timeout_s
+        self._client = client
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            if not self._api_key:
+                raise LLMUnavailable("GEMMA4_API_KEY is not set.")
+            self._client = httpx.AsyncClient(
+                base_url=self._base_url,
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                timeout=self._timeout,
+            )
+        return self._client
+
+    async def chat(self, *, system: str, messages: list[dict], tools: list[dict]) -> LLMTurn:
+        body: dict = {
+            "model": self.model,
+            "messages": [{"role": "system", "content": system}, *messages],
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+        }
+        if tools:
+            body["tools"] = openai_tools(tools)
+            body["tool_choice"] = "auto"
+
+        data = None
+        for attempt in range(2):  # one retry for transient failures; a shop counter can't wait longer
+            try:
+                resp = await self.client.post("/chat/completions", json=body)
+            except httpx.HTTPError as exc:  # connection error / timeout
+                if attempt == 0:
+                    log.warning("gemma4 request failed (%s), retrying", exc)
+                    continue
+                raise LLMUnavailable(f"Gemma 4 unreachable: {exc}") from exc
+            if resp.status_code == 429:
+                raise LLMUnavailable(f"Gemma 4 rate limited: {resp.text[:200]}", rate_limited=True)
+            if resp.status_code >= 500 and attempt == 0:
+                log.warning("gemma4 %s, retrying", resp.status_code)
+                continue
+            if resp.status_code >= 400:
+                raise LLMUnavailable(f"Gemma 4 error {resp.status_code}: {resp.text[:300]}")
+            data = resp.json()
+            break
+        if not data or not data.get("choices"):
+            raise LLMUnavailable(f"Gemma 4 returned no choices: {str(data)[:300]}")
+
+        msg = data["choices"][0].get("message") or {}
+        calls = []
+        for i, tc in enumerate(msg.get("tool_calls") or []):
+            fn = tc.get("function") or {}
+            raw = fn.get("arguments")
+            if isinstance(raw, dict):  # some servers send parsed arguments
+                raw = json.dumps(raw)
+            calls.append(ToolCall(tc.get("id") or f"call_{i}", fn.get("name", ""), _parse_args(raw), raw or ""))
+        content = _THINK.sub("", msg.get("content") or "").strip()
+        return _turn(content, calls)
+
+
+def make_llm() -> LLMClient:
+    """The configured LLM (LLM_PROVIDER): gemma4 by default, groq as the alternative."""
+    provider = get_settings().llm_provider.strip().lower()
+    if provider == "groq":
+        return GroqLLM()
+    if provider in ("gemma4", "gemma"):
+        return Gemma4LLM()
+    raise ValueError(f"Unknown LLM_PROVIDER {provider!r}: use 'gemma4' or 'groq'.")

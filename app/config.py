@@ -13,7 +13,14 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite+aiosqlite:///./khata.db"
 
-    # LLM (Groq)
+    # LLM provider: "gemma4" (OpenAI-compatible endpoint below) or "groq".
+    llm_provider: str = "gemma4"
+    gemma4_base_url: str = "https://llm-chat.markytics.com/v1"
+    gemma4_api_key: str = ""
+    gemma4_model: str = "google/gemma-4-E4B-it"
+    gemma4_timeout_s: float = 30.0
+
+    # LLM (Groq) - used when LLM_PROVIDER=groq
     groq_api_key: str = ""
     llm_model: str = "qwen/qwen3.8-27b"
     # Qwen3 reasons before answering; "hidden" keeps that out of the reply. Empty = don't send.
@@ -57,6 +64,9 @@ class Settings(BaseSettings):
     batch_minutes: int = 15
     digest_hour: int = 20
     public_base_url: str = "http://localhost:8000"  # passbook and pay links in messages
+    # Built Expo web app (`npx expo export --platform web --output-dir dist` in Khatabol-frontend),
+    # served at / so one URL (e.g. an ngrok tunnel) gives both the app and the API.
+    web_dist_dir: str = "../Khatabol-frontend/dist"
     otp_ttl_seconds: int = 300
     passbook_session_hours: int = 24
 

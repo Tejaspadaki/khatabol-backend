@@ -118,3 +118,79 @@ async def test_sarvam_errors():
 
 def test_for_speech():
     assert for_speech("₹350 udhaar, ab ₹12,34,567 baaki") == "350 rupaye udhaar, ab 12,34,567 rupaye baaki"
+
+
+# --- Gemma 4 (OpenAI-compatible endpoint) ---
+
+from app.agent.llm import Gemma4LLM, make_llm  # noqa: E402
+
+
+def _gemma(handler) -> Gemma4LLM:
+    client = httpx.AsyncClient(base_url="https://gemma.test/v1", transport=httpx.MockTransport(handler))
+    return Gemma4LLM(client)
+
+
+async def test_gemma_tool_calls_are_parsed():
+    seen = {}
+
+    def handler(request: httpx.Request):
+        seen["path"], seen["body"] = request.url.path, json.loads(request.content)
+        return httpx.Response(200, json={"choices": [{"message": {"content": None, "tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "find_customer", "arguments": '{"name_query": "ramesh"}'}},
+            {"id": "c2", "type": "function", "function": {"name": "get_balance", "arguments": {"customer": "x"}}},
+        ]}}]})
+
+    turn = await _gemma(handler).chat(system="sys", messages=[{"role": "user", "content": "hi"}], tools=TOOL_SCHEMAS)
+    assert seen["path"] == "/v1/chat/completions"
+    assert seen["body"]["messages"][0] == {"role": "system", "content": "sys"}
+    assert seen["body"]["tools"][0]["function"]["name"] == "find_customer"
+    assert turn.tool_calls[0].arguments == {"name_query": "ramesh"}
+    assert turn.tool_calls[1].arguments == {"customer": "x"}  # dict arguments are accepted too
+    assert turn.message["tool_calls"][0]["function"]["name"] == "find_customer"
+
+
+async def test_gemma_text_reply_strips_think():
+    def handler(request):
+        return httpx.Response(200, json={"choices": [{"message": {"content": "<think>hmm</think>theek hai"}}]})
+
+    turn = await _gemma(handler).chat(system="s", messages=[], tools=[])
+    assert turn.text == "theek hai" and turn.tool_calls == []
+
+
+async def test_gemma_retries_5xx_once_then_succeeds():
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(502, text="bad gateway")
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    turn = await _gemma(handler).chat(system="s", messages=[], tools=[])
+    assert turn.text == "ok" and len(calls) == 2
+
+
+async def test_gemma_errors_become_unavailable():
+    with pytest.raises(LLMUnavailable, match="401"):
+        await _gemma(lambda r: httpx.Response(401, json={"detail": "Missing API key"})).chat(
+            system="s", messages=[], tools=[])
+    with pytest.raises(LLMUnavailable) as exc:
+        await _gemma(lambda r: httpx.Response(429, text="slow down")).chat(system="s", messages=[], tools=[])
+    assert exc.value.rate_limited
+
+
+async def test_gemma_without_key():
+    llm = Gemma4LLM()
+    llm._api_key = ""
+    with pytest.raises(LLMUnavailable, match="GEMMA4_API_KEY"):
+        await llm.chat(system="s", messages=[], tools=[])
+
+
+def test_make_llm_follows_provider(monkeypatch):
+    from app.config import get_settings
+
+    s = get_settings()
+    monkeypatch.setattr(s, "llm_provider", "gemma4")
+    assert isinstance(make_llm(), Gemma4LLM)
+    monkeypatch.setattr(s, "llm_provider", "groq")
+    assert isinstance(make_llm(), GroqLLM)

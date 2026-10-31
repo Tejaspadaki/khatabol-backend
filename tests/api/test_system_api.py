@@ -14,9 +14,20 @@ async def test_SYS_01_health(client):
     assert r.status_code == 200 and r.json() == {"ok": True}
 
 
-async def test_SYS_02_root_redirects_to_app(client):
+async def test_SYS_02_root_serves_web_app_or_redirects(client):
+    """/ serves the built Expo app when it exists (the shareable link), else redirects to the bundled /app."""
+    from app import main
+
     r = await client.get("/")
-    assert r.status_code == 307 and r.headers["location"] == "/app"
+    if main._DIST_INDEX.exists():
+        assert r.status_code == 200 and "text/html" in r.headers["content-type"]
+    else:
+        assert r.status_code == 307 and r.headers["location"] == "/app"
+
+
+async def test_SYS_02b_unknown_api_path_is_404_not_web_app(client):
+    r = await client.get("/api/merchants/nope/does-not-exist")
+    assert r.status_code == 404 and r.headers["content-type"].startswith("application/json")
 
 
 async def test_SYS_03_openapi_lists_every_route(client):

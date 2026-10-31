@@ -13,7 +13,7 @@ The design and module map are in [PLAN.md](PLAN.md).
 ```bash
 cd backend
 uv sync
-cp .env.example .env              # add GROQ_API_KEY and SARVAM_API_KEY
+cp .env.example .env              # add GEMMA4_API_KEY (or GROQ_API_KEY with LLM_PROVIDER=groq) and SARVAM_API_KEY
 uv run uvicorn app.main:app --reload
 ```
 
@@ -33,7 +33,7 @@ API docs are at http://127.0.0.1:8000/docs. The older demo console is still at `
 
 To test the endpoints by hand, open http://127.0.0.1:8000/demo/tester. Every endpoint is a form there: pick a merchant, fill the inputs and press Send to see the response. It can also record voice, play TTS audio and show live WebSocket events.
 
-The ledger, payments, reminders and demo page work with no keys. `/agent/*` needs `GROQ_API_KEY`, and voice/TTS needs `SARVAM_API_KEY`.
+The ledger, payments, reminders and demo page work with no keys. `/agent/*` needs `GEMMA4_API_KEY` (or `GROQ_API_KEY` with `LLM_PROVIDER=groq`), and voice/TTS needs `SARVAM_API_KEY`.
 
 ## Test
 
