@@ -11,6 +11,7 @@ from app.config import get_settings
 from app.db.base import get_sessionmaker
 from app.db.models import Merchant
 from app.events import bus
+from app.i18n import t
 from app.ledger import service as ledger
 from app.ledger.errors import LedgerError
 from app.nlp.hinglish_numbers import format_rupees
@@ -19,11 +20,9 @@ from app.scheduler.reminders import send_reminders
 log = logging.getLogger("khata.scheduler")
 
 
-def summary_text(s: dict) -> str:
-    return (
-        f"Aaj {format_rupees(s['credit_given_paise'])} udhaar diya, {format_rupees(s['collected_paise'])} "
-        f"wapas aaya. Kul {format_rupees(s['outstanding_paise'])} baaki hai."
-    )
+def summary_text(s: dict, lang: str = "hi") -> str:
+    return t(lang, "daily_summary", credit=format_rupees(s["credit_given_paise"]),
+             collected=format_rupees(s["collected_paise"]), outstanding=format_rupees(s["outstanding_paise"]))
 
 
 async def _merchants(session) -> list[Merchant]:
@@ -44,7 +43,7 @@ async def morning_reminders() -> None:
                 continue
             await session.commit()
             if sent:
-                bus.publish(m.id, "reminders_sent", f"{len(sent)} customers ko reminder bhej diya.")
+                bus.publish(m.id, "reminders_sent", t(m.language, "reminders_sent", n=len(sent)))
 
 
 async def evening_summary() -> None:
@@ -52,7 +51,7 @@ async def evening_summary() -> None:
     async with get_sessionmaker()() as session:
         for m in await _merchants(session):
             s = await ledger.daily_summary(session, m.id, today)
-            bus.publish(m.id, "daily_summary", summary_text(s))
+            bus.publish(m.id, "daily_summary", summary_text(s, m.language))
 
 
 async def nightly_verify() -> None:

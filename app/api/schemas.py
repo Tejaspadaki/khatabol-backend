@@ -12,6 +12,16 @@ class MerchantIn(BaseModel):
     large_amount_threshold_rupees: float = Field(10_000, gt=0)
 
 
+class MerchantUpdate(BaseModel):
+    """Partial update: only the fields sent are changed."""
+
+    name: str | None = Field(None, min_length=1, max_length=200)
+    phone: str | None = None
+    upi_vpa: str | None = None
+    language: Literal["hi", "mr", "en"] | None = None
+    large_amount_threshold_rupees: float | None = Field(None, gt=0)
+
+
 class CustomerIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     phone: str | None = None

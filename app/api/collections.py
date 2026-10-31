@@ -65,10 +65,11 @@ async def reminders(merchant_id: uuid.UUID, body: ReminderIn, session: AsyncSess
 @router.get("/summary")
 async def summary(merchant_id: uuid.UUID, day: date | None = None, session: AsyncSession = Depends(get_session)):
     s = await ledger.daily_summary(session, merchant_id, day or today_ist())
+    lang = (await ledger.get_merchant(session, merchant_id)).language
     return {
         **s,
         "credit_given": format_rupees(s["credit_given_paise"]),
         "collected": format_rupees(s["collected_paise"]),
         "outstanding": format_rupees(s["outstanding_paise"]),
-        "spoken": summary_text(s),
+        "spoken": summary_text(s, lang),
     }

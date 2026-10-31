@@ -138,3 +138,9 @@ async def test_PAY_15_payment_is_tied_to_one_merchant(client, seeded, mid):
     await give_credit(client, mid, cid, 100)
     assert (await client.post(f"/api/merchants/{seeded}/payments/U1/assign",
                               json={"customer_id": cid})).status_code == 404
+
+
+async def test_PAY_EN_announcement_in_merchant_language(client, seeded):
+    await client.patch(f"/api/merchants/{seeded}", json={"language": "en"})
+    body = (await incoming(client, seeded, payer_vpa="ramesh.p@okaxis", amount_rupees=300, txn_id="TEN")).json()
+    assert body["announcement"] == "Ramesh Patil paid ₹300 by UPI. Now ₹200 due."

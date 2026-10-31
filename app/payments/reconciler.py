@@ -21,6 +21,7 @@ from app.db.models import (
     UpiTxnStatus,
 )
 from app.events import bus
+from app.i18n import t
 from app.ledger import service as ledger
 from app.ledger.errors import LedgerError, NotFoundError
 from app.nlp.hinglish_numbers import format_rupees
@@ -61,7 +62,7 @@ async def _get_txn(session: AsyncSession, merchant_id: uuid.UUID, txn_id: str) -
     stmt = select(UpiTransaction).where(UpiTransaction.merchant_id == merchant_id, UpiTransaction.txn_id == txn_id)
     txn = (await session.execute(stmt)).scalar_one_or_none()
     if txn is None:
-        raise NotFoundError("Ye payment nahi mila.")
+        raise NotFoundError.of("err_payment_not_found")
     return txn
 
 
@@ -73,7 +74,7 @@ async def _has_any_dues(session: AsyncSession, merchant_id: uuid.UUID) -> bool:
 async def handle_payment(session: AsyncSession, event: PaymentEvent) -> ReconcileResult:
     """Caller commits. A concurrent duplicate fails on the txn_id UNIQUE constraint."""
     if event.amount_paise <= 0:
-        raise LedgerError("Payment amount must be positive.")
+        raise LedgerError.of("err_payment_positive")
     stmt = select(UpiTransaction).where(UpiTransaction.txn_id == event.txn_id)
     existing = (await session.execute(stmt)).scalar_one_or_none()
     if existing:
@@ -100,6 +101,7 @@ async def handle_payment(session: AsyncSession, event: PaymentEvent) -> Reconcil
             await ledger.link_upi(session, event.merchant_id, customer.id, vpa, linked_via="payment_link", verified=True)
 
     amount = format_rupees(event.amount_paise)
+    lang = (await ledger.get_merchant(session, event.merchant_id)).language
     if customer is not None:
         txn.customer_id = customer.id
         if customer.balance_paise > 0:
@@ -115,20 +117,21 @@ async def handle_payment(session: AsyncSession, event: PaymentEvent) -> Reconcil
             )
             txn.status = UpiTxnStatus.APPLIED
             txn.ledger_entry_id = entry.id
-            text = f"{customer.name} ne {amount} UPI se diye. {balance_phrase(customer.balance_paise).capitalize()}."
+            balance = balance_phrase(customer.balance_paise, lang).capitalize()
+            text = t(lang, "upi_applied", name=customer.name, amount=amount, balance=balance)
             await session.flush()
             return ReconcileResult(txn, False, text, "upi_applied", customer)
-        text = f"{amount} prapt hue, {customer.name} se."
+        text = t(lang, "upi_sale_from", amount=amount, name=customer.name)
         await session.flush()
         return ReconcileResult(txn, False, text, "upi_sale", customer)
 
     if await _has_any_dues(session, event.merchant_id):
         txn.status = UpiTxnStatus.UNMATCHED
-        text = f"{amount} {vpa} se aaye. Kiska hai?"
+        text = t(lang, "upi_unmatched", amount=amount, vpa=vpa)
         await session.flush()
         return ReconcileResult(txn, False, text, "upi_unmatched")
 
-    text = f"{amount} prapt hue."
+    text = t(lang, "upi_sale", amount=amount)
     await session.flush()
     return ReconcileResult(txn, False, text, "upi_sale")
 
@@ -144,7 +147,7 @@ async def assign_payment(
     """Merchant answers "whose payment is this?". Links the VPA so it auto-matches next time."""
     txn = await _get_txn(session, merchant_id, txn_id)
     if txn.status in (UpiTxnStatus.APPLIED, UpiTxnStatus.RESOLVED):
-        raise LedgerError("Ye payment pehle hi khate mein jud chuka hai.")
+        raise LedgerError.of("err_payment_linked")
     customer = await ledger.get_customer(session, merchant_id, customer_id)
     await ledger.link_upi(session, merchant_id, customer_id, txn.payer_vpa, linked_via="merchant_answer")
     # After an undo, the reversed entry still holds this txn_id (UNIQUE), so don't reuse it.
@@ -171,7 +174,7 @@ async def undo_auto_payment(session: AsyncSession, merchant_id: uuid.UUID, txn_i
     """"Ye Ramesh ka nahi tha": reverse the entry, forget the VPA link, ask again."""
     txn = await _get_txn(session, merchant_id, txn_id)
     if txn.ledger_entry_id is None:
-        raise LedgerError("Is payment se khate mein koi entry nahi bani thi.")
+        raise LedgerError.of("err_payment_no_entry")
     await ledger.reverse_entry(session, merchant_id, txn.ledger_entry_id, note="UPI payment wrongly matched")
     handle_stmt = select(CustomerUpiHandle).where(
         CustomerUpiHandle.merchant_id == merchant_id, CustomerUpiHandle.vpa == txn.payer_vpa

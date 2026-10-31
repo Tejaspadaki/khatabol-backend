@@ -68,11 +68,11 @@ def resolve_due_date(phrase: str | None, today: date, salary_day: int = 1) -> da
 
     if tokset & {"aaj", "today", "आज"}:
         return today
-    if tokset & {"parson", "parso", "parsoon", "परसों"}:
+    if tokset & {"parson", "parso", "parsoon", "परसों", "parva", "परवा"}:
         return today + timedelta(days=2)
     if tokset & {"narson", "narso"}:
         return today + timedelta(days=3)
-    if tokset & {"kal", "tomorrow", "कल"}:
+    if tokset & {"kal", "tomorrow", "कल", "udya", "उद्या"}:
         return today + timedelta(days=1)
     if "salary" in tokset or "tankhwah" in tokset or "pagaar" in tokset:
         return _add_months(today.replace(day=1), 1, salary_day)

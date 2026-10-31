@@ -6,10 +6,14 @@ YES = {
     "haan", "han", "haa", "ha", "haanji", "hanji", "ji", "jee", "yes", "yeah", "yep", "ok", "okay",
     "theek", "thik", "sahi", "kar", "karo", "kardo", "save", "done", "confirm", "bilkul", "pakka",
     "chalega", "hmm", "hm", "acha", "accha", "achha", "हाँ", "हां", "जी", "ठीक", "सही", "बिल्कुल",
+    # Marathi and English
+    "hoy", "barobar", "chalel", "nakki", "हो", "होय", "बरोबर", "चालेल", "sure", "correct", "right",
 }
 NO = {
     "nahi", "nahin", "nai", "na", "naa", "no", "nope", "mat", "cancel", "galat", "rehne", "ruko",
     "chhodo", "chodo", "नहीं", "मत", "गलत", "रहने",
+    # Marathi and English
+    "nako", "naahi", "chuk", "नको", "नाही", "चूक", "wrong",
 }
 FILLER = {"hai", "h", "do", "de", "dijiye", "please", "bhai", "bhaiya", "ho", "gaya", "yaar", "dena", "doh"}
 

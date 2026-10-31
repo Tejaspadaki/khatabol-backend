@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.tools import NEW_PREFIX, ToolContext, active_pending, customer_card, entry_card
 from app.db.models import EntrySource, LedgerEntry, PaymentMode, PendingAction, PendingStatus
+from app.i18n import t
 from app.ledger import service as ledger
 from app.ledger.errors import LedgerError
 from app.nlp.hinglish_numbers import format_rupees
@@ -26,18 +27,19 @@ class ConfirmOutcome:
 def _customer_id(raw: str, id_map: dict[str, uuid.UUID]) -> uuid.UUID:
     if raw.startswith(NEW_PREFIX):
         if raw not in id_map:
-            raise LedgerError("Naya customer save nahi hua, isliye entry bhi nahi ho sakti.")
+            raise LedgerError.of("err_new_customer_failed")
         return id_map[raw]
     return uuid.UUID(raw)
 
 
 async def _commit_one(ctx: ToolContext, pa: PendingAction, id_map: dict[str, uuid.UUID]) -> tuple[str, dict]:
     s, m, a = ctx.session, ctx.merchant, pa.args
+    lang = m.language
     vl = pa.voice_log_id
     if pa.tool == "create_customer":
         c = await ledger.create_customer(s, m.id, a["name"], a.get("phone"), [a["nickname"]] if a.get("nickname") else [])
         id_map[f"{NEW_PREFIX}{pa.id}"] = c.id
-        return f"{c.name} ka khata khul gaya", {"customer": customer_card(c)}
+        return t(lang, "did_open_khata", name=c.name), {"customer": customer_card(c)}
 
     if pa.tool == "add_credit":
         cid = _customer_id(a["customer_id"], id_map)
@@ -45,7 +47,7 @@ async def _commit_one(ctx: ToolContext, pa: PendingAction, id_map: dict[str, uui
         e = await ledger.add_credit(s, m.id, cid, a["amount_paise"], due, a.get("items"), a.get("note"),
                                     EntrySource.VOICE, vl, a.get("spoken_name"))
         c = await ledger.get_customer(s, m.id, cid)
-        return f"{c.name}: {balance_phrase(c.balance_paise)}", {"entry": entry_card(e, c.name), "customer": customer_card(c)}
+        return f"{c.name}: {balance_phrase(c.balance_paise, lang)}", {"entry": entry_card(e, c.name), "customer": customer_card(c)}
 
     if pa.tool == "record_payment":
         cid = _customer_id(a["customer_id"], id_map)
@@ -53,13 +55,13 @@ async def _commit_one(ctx: ToolContext, pa: PendingAction, id_map: dict[str, uui
         e = await ledger.record_payment(s, m.id, cid, a["amount_paise"], mode, EntrySource.VOICE,
                                         voice_log_id=vl, spoken_name=a.get("spoken_name"))
         c = await ledger.get_customer(s, m.id, cid)
-        return f"{c.name}: {balance_phrase(c.balance_paise)}", {"entry": entry_card(e, c.name), "customer": customer_card(c)}
+        return f"{c.name}: {balance_phrase(c.balance_paise, lang)}", {"entry": entry_card(e, c.name), "customer": customer_card(c)}
 
     if pa.tool == "link_upi":
         cid = _customer_id(a["customer_id"], id_map)
         h = await ledger.link_upi(s, m.id, cid, a["vpa"], linked_via="voice")
         c = await ledger.get_customer(s, m.id, cid)
-        return f"{c.name} ki UPI ID jud gayi", {"vpa": h.vpa, "customer": customer_card(c)}
+        return t(lang, "did_link_upi", name=c.name), {"vpa": h.vpa, "customer": customer_card(c)}
 
     if pa.tool == "send_reminder":
         if a.get("customer_id"):
@@ -70,7 +72,7 @@ async def _commit_one(ctx: ToolContext, pa: PendingAction, id_map: dict[str, uui
             rows = await ledger.list_dues(s, m.id, "today", ctx.today)
             targets = [(r["customer"], r["balance_paise"], r["next_due_date"]) for r in rows]
         sent = await send_reminders(s, m, targets)
-        return f"{len(sent)} reminder bhej diye", {"reminders": [str(r.id) for r in sent]}
+        return t(lang, "did_send_reminders", n=len(sent)), {"reminders": [str(r.id) for r in sent]}
 
     if pa.tool == "undo_last":
         entry_id = uuid.UUID(a["entry_id"])
@@ -80,12 +82,13 @@ async def _commit_one(ctx: ToolContext, pa: PendingAction, id_map: dict[str, uui
         else:
             await ledger.reverse_entry(s, m.id, entry_id, note="undo by merchant", voice_log_id=vl)
         c = await ledger.get_customer(s, m.id, original.customer_id)
-        return f"entry cancel ho gayi, {c.name}: {balance_phrase(c.balance_paise)}", {"customer": customer_card(c)}
+        return t(lang, "did_undo", name=c.name, balance=balance_phrase(c.balance_paise, lang)), {"customer": customer_card(c)}
 
     if pa.tool == "assign_upi_payment":
         cid = _customer_id(a["customer_id"], id_map)
         txn, c = await reconciler.assign_payment(s, m.id, a["txn_id"], cid, EntrySource.VOICE, vl)
-        return (f"{format_rupees(txn.amount_paise)} {c.name} ke khate mein, {balance_phrase(c.balance_paise)}",
+        return (t(lang, "upi_assigned", amount=format_rupees(txn.amount_paise), name=c.name,
+                  balance=balance_phrase(c.balance_paise, lang)),
                 {"customer": customer_card(c)})
 
     raise LedgerError(f"Unknown pending tool {pa.tool}")
@@ -93,6 +96,7 @@ async def _commit_one(ctx: ToolContext, pa: PendingAction, id_map: dict[str, uui
 
 async def confirm(ctx: ToolContext) -> ConfirmOutcome | None:
     """Merchant said yes. Commit every pending action of this session atomically."""
+    lang = ctx.merchant.language
     actions = await active_pending(ctx.session, ctx.merchant.id, ctx.session_id)
     if not actions:
         return None
@@ -101,7 +105,7 @@ async def confirm(ctx: ToolContext) -> ConfirmOutcome | None:
     waiting = [pa for pa in actions if pa.confirmations_received < pa.confirmations_needed]
     if waiting:
         return ConfirmOutcome(
-            reply=f"Bada amount hai: {waiting[0].summary}. Pakka save karun?",
+            reply=t(lang, "big_confirm", summary=waiting[0].summary),
             outcome="awaiting_second_confirm",
         )
 
@@ -118,8 +122,8 @@ async def confirm(ctx: ToolContext) -> ConfirmOutcome | None:
     except LedgerError as exc:
         for pa in actions:
             pa.status = PendingStatus.CANCELLED
-        return ConfirmOutcome(reply=f"Save nahi hua: {exc}", outcome="failed")
-    return ConfirmOutcome(reply="Ho gaya. " + ". ".join(phrases) + ".", committed=committed)
+        return ConfirmOutcome(reply=t(lang, "save_failed", error=exc.text(lang)), outcome="failed")
+    return ConfirmOutcome(reply=t(lang, "done") + " " + ". ".join(phrases) + ".", committed=committed)
 
 
 async def cancel(session: AsyncSession, merchant_id: uuid.UUID, session_id: str) -> int:

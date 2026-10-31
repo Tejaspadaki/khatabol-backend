@@ -60,7 +60,7 @@ async def create_merchant(
 async def get_merchant(session: AsyncSession, merchant_id: uuid.UUID) -> Merchant:
     m = await session.get(Merchant, merchant_id)
     if m is None:
-        raise NotFoundError("Merchant nahi mila.")
+        raise NotFoundError.of("err_merchant_not_found")
     return m
 
 
@@ -76,7 +76,7 @@ async def create_customer(
     name = " ".join(name.split()).title() if name.isascii() else " ".join(name.split())
     normalized = normalize_name(name)
     if not normalized:
-        raise LedgerError("Customer ka naam samajh nahi aaya.")
+        raise LedgerError.of("err_customer_name")
     c = Customer(
         merchant_id=merchant_id,
         name=name,
@@ -98,7 +98,7 @@ async def get_customer(
         stmt = stmt.with_for_update()
     c = (await session.execute(stmt)).scalar_one_or_none()
     if c is None:
-        raise NotFoundError("Ye customer is khata mein nahi hai.")
+        raise NotFoundError.of("err_customer_not_found")
     return c
 
 
@@ -143,9 +143,9 @@ def learn_nickname(customer: Customer, spoken_name: str | None) -> bool:
 
 def _check_amount(amount_paise: int) -> None:
     if amount_paise <= 0:
-        raise LedgerError("Amount zero se zyada hona chahiye.")
+        raise LedgerError.of("err_amount_positive")
     if amount_paise > MAX_AMOUNT_PAISE:
-        raise LedgerError("Amount bahut bada hai, dobara check kijiye.")
+        raise LedgerError.of("err_amount_too_big")
 
 
 async def _append(session: AsyncSession, customer: Customer, entry: LedgerEntry, delta: int) -> LedgerEntry:
@@ -231,11 +231,11 @@ async def reverse_entry(
 ) -> LedgerEntry:
     original = await session.get(LedgerEntry, entry_id)
     if original is None or original.merchant_id != merchant_id:
-        raise NotFoundError("Ye entry nahi mili.")
+        raise NotFoundError.of("err_entry_not_found")
     if original.type == EntryType.REVERSAL:
-        raise LedgerError("Reversal ko reverse nahi kar sakte.")
+        raise LedgerError.of("err_reverse_reversal")
     if await _is_reversed(session, entry_id):
-        raise LedgerError("Ye entry pehle hi cancel ho chuki hai.")
+        raise LedgerError.of("err_entry_cancelled")
     customer = await get_customer(session, merchant_id, original.customer_id, lock=True)
     entry = LedgerEntry(
         merchant_id=merchant_id,
@@ -273,7 +273,7 @@ async def link_upi(
 ) -> CustomerUpiHandle:
     vpa = vpa.strip().lower()
     if "@" not in vpa or " " in vpa:
-        raise LedgerError("UPI ID sahi nahi lag rahi (jaise naam@bank).")
+        raise LedgerError.of("err_bad_upi")
     await get_customer(session, merchant_id, customer_id)
     stmt = select(CustomerUpiHandle).where(
         CustomerUpiHandle.merchant_id == merchant_id, CustomerUpiHandle.vpa == vpa
@@ -355,7 +355,7 @@ DUE_FILTERS = ("today", "overdue", "this_week", "all")
 async def list_dues(session: AsyncSession, merchant_id: uuid.UUID, filter: str, today: date) -> list[dict]:
     """Customers with outstanding dues matching the filter, biggest first."""
     if filter not in DUE_FILTERS:
-        raise LedgerError(f"Filter {filter} samajh nahi aaya.")
+        raise LedgerError.of("err_bad_filter", filter=filter)
     stmt = select(Customer).where(Customer.merchant_id == merchant_id, Customer.balance_paise > 0)
     rows = []
     for c in (await session.execute(stmt)).scalars():

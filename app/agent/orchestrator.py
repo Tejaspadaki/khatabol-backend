@@ -18,6 +18,7 @@ from app.agent.prompts import system_prompt, user_turn
 from app.agent.tools import TOOL_SCHEMAS, WRITE_TOOLS, ToolContext, active_pending, execute_tool, to_json
 from app.config import get_settings
 from app.db.models import VoiceLog
+from app.i18n import t
 from app.ledger import service as ledger
 from app.ledger.errors import LedgerError
 from app.nlp.confirm import classify_confirmation, classify_goodbye
@@ -26,9 +27,6 @@ from app.nlp.hinglish_numbers import normalize_amounts
 log = logging.getLogger("khata.agent")
 
 LOW_CONFIDENCE = 0.6
-FALLBACK_REPLY = "Maaf kijiye, samajh nahi aaya. Phir se boliye?"
-LLM_DOWN_REPLY = "Abhi assistant se baat nahi ho pa rahi. Thodi der mein try kijiye, ya app se entry kijiye."
-LLM_BUSY_REPLY = "Abhi bahut zyada requests aa rahi hain. Ek minute baad boliye, ya app se entry kijiye."
 _AMOUNT_IN_SUMMARY = re.compile(r"₹[\d,]+(?:\.\d+)?")
 
 
@@ -70,8 +68,8 @@ class HistoryStore:
 _SKIP_FINAL_TOOLS = WRITE_TOOLS - {"create_customer"} | {"cancel_pending"}
 
 
-def _readback(proposed) -> str:
-    return ". ".join(p.summary[0].upper() + p.summary[1:] for p in proposed) + ". Save karun?"
+def _readback(proposed, lang: str) -> str:
+    return ". ".join(p.summary[0].upper() + p.summary[1:] for p in proposed) + ". " + t(lang, "ask_save")
 
 
 def _readback_ok(reply: str, summaries: list[str]) -> bool:
@@ -102,6 +100,7 @@ class Orchestrator:
         settings = get_settings()
         session_id = session_id or "default"
         merchant = await ledger.get_merchant(session, merchant_id)
+        lang = merchant.language
         today = (now or datetime.now(settings.tz)).astimezone(settings.tz).date()
         text = " ".join((text or "").split())
 
@@ -113,7 +112,7 @@ class Orchestrator:
         result = TurnResult(reply="", session_id=session_id, voice_log_id=vlog.id, outcome="")
 
         if not text or (stt_confidence is not None and stt_confidence < LOW_CONFIDENCE):
-            result.reply, result.outcome = "Phir se boliye?", "low_confidence"
+            result.reply, result.outcome = t(lang, "say_again"), "low_confidence"
             return await self._finish(session, vlog, result, started)
 
         pending = await active_pending(session, merchant.id, session_id)
@@ -134,8 +133,8 @@ class Orchestrator:
                 reply = out.reply + " "
             elif pending:
                 n = await gate.cancel(session, merchant.id, session_id)
-                reply = f"{n} entry save nahi ki. " if n == 1 else f"{n} entries save nahi ki. "
-            result.reply, result.outcome = reply + "Theek hai, phir milte hain.", "ended"
+                reply = t(lang, "not_saved_one" if n == 1 else "not_saved_many", n=n)
+            result.reply, result.outcome = reply + t(lang, "goodbye"), "ended"
             self.history.reset(merchant.id, session_id)
             return await self._finish(session, vlog, result, started)
 
@@ -148,7 +147,7 @@ class Orchestrator:
                 result.pending = [self._card(p) for p in pending]
         elif verdict == "no":
             await gate.cancel(session, merchant.id, session_id)
-            result.reply, result.outcome = "Theek hai, cancel kar diya.", "cancelled"
+            result.reply, result.outcome = t(lang, "cancelled"), "cancelled"
         if verdict:
             if history:
                 history.append({"role": "user", "content": text})
@@ -170,7 +169,7 @@ class Orchestrator:
                 turn = await self.llm.chat(system=system, messages=history, tools=TOOL_SCHEMAS)
             except LLMUnavailable as exc:
                 log.error("LLM unavailable: %s", exc)
-                llm_down = LLM_BUSY_REPLY if exc.rate_limited else LLM_DOWN_REPLY
+                llm_down = t(lang, "llm_busy" if exc.rate_limited else "llm_down")
                 break
             history.append(turn.message)
             if not turn.tool_calls:
@@ -193,7 +192,7 @@ class Orchestrator:
             if ctx.proposed and all(c["ok"] and c["name"] in _SKIP_FINAL_TOOLS for c in round_calls):
                 # Only proposals this round: the read-back is built from the summaries anyway, so skip
                 # the extra LLM call (saves ~1s and a third of the tokens per write).
-                reply = _readback(ctx.proposed)
+                reply = _readback(ctx.proposed, lang)
                 history.append({"role": "assistant", "content": reply})
                 finished = True
                 break
@@ -204,8 +203,8 @@ class Orchestrator:
         proposed = ctx.proposed
         summaries = [p.summary for p in proposed]
         if proposed and not _readback_ok(reply, summaries):
-            reply = _readback(proposed)
-        result.reply = reply or llm_down or FALLBACK_REPLY
+            reply = _readback(proposed, lang)
+        result.reply = reply or llm_down or t(lang, "fallback")
         result.pending = [self._card(p) for p in proposed]
         if proposed:
             result.outcome = "awaiting_confirmation"

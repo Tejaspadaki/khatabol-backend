@@ -72,7 +72,7 @@ async def add_credit(
     if body.due:
         due = resolve_due_date(body.due, today_ist())
         if due is None:
-            raise LedgerError(f"Due date '{body.due}' samajh nahi aayi.")
+            raise LedgerError.of("err_bad_due", due=body.due)
     e = await ledger.add_credit(session, merchant_id, customer_id, rupees_to_paise(body.amount_rupees), due,
                                 body.items, body.note, EntrySource.MANUAL)
     c = await ledger.get_customer(session, merchant_id, customer_id)

@@ -26,9 +26,10 @@ class Transcript:
     request_id: str | None = None
 
 
-def for_speech(text: str) -> str:
+def for_speech(text: str, language: str = "hi") -> str:
     """'₹1,500 baaki' -> '1,500 rupaye baaki' so TTS reads money naturally."""
-    return _RUPEES.sub(lambda m: f"{m.group(1)} rupaye", text)
+    word = "rupees" if language == "en" else "rupaye"
+    return _RUPEES.sub(lambda m: f"{m.group(1)} {word}", text)
 
 
 class SarvamClient:
@@ -61,7 +62,7 @@ class SarvamClient:
     async def synthesize(self, text: str, language: str = "hi") -> bytes:
         """Returns WAV bytes."""
         payload = {
-            "text": for_speech(text)[:2500],
+            "text": for_speech(text, language)[:2500],
             "language_code": LANGUAGE_CODES.get(language, "hi-IN"),
             "model": self.s.sarvam_tts_model,
             "speaker": self.s.sarvam_tts_speaker,

@@ -40,3 +40,18 @@ async def test_MER_05_get_unknown_merchant(client):
 
 async def test_MER_06_get_malformed_id(client):
     assert (await client.get("/api/merchants/not-a-uuid")).status_code == 422
+
+
+async def test_MER_07_update_language(client):
+    mid = await create_merchant(client)
+    r = await client.patch(f"/api/merchants/{mid}", json={"language": "en"})
+    assert r.status_code == 200 and r.json()["language"] == "en"
+    assert (await client.get(f"/api/merchants/{mid}")).json()["language"] == "en"
+    assert (await client.patch(f"/api/merchants/{mid}", json={"language": "fr"})).status_code == 422
+
+
+async def test_MER_08_errors_follow_accept_language(client):
+    r = await client.get(f"/api/merchants/{ZERO_ID}", headers={"Accept-Language": "en"})
+    assert r.status_code == 404 and r.json()["detail"] == "Shop not found."
+    r = await client.get(f"/api/merchants/{ZERO_ID}", headers={"Accept-Language": "mr"})
+    assert r.json()["detail"] == "Merchant sapadla nahi."

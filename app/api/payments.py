@@ -10,6 +10,7 @@ import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import i18n
 from app.agent.tools import customer_card
 from app.api.deps import get_session
 from app.api.schemas import AssignIn, IncomingPaymentIn
@@ -62,10 +63,12 @@ async def unmatched(merchant_id: uuid.UUID, session: AsyncSession = Depends(get_
 async def assign(merchant_id: uuid.UUID, txn_id: str, body: AssignIn, session: AsyncSession = Depends(get_session)):
     txn, c = await reconciler.assign_payment(session, merchant_id, txn_id, body.customer_id)
     await session.commit()
+    lang = (await ledger.get_merchant(session, merchant_id)).language
     return {
         **_txn_out(txn),
         "customer": customer_card(c),
-        "spoken": f"{format_rupees(txn.amount_paise)} {c.name} ke khate mein, {balance_phrase(c.balance_paise)}.",
+        "spoken": i18n.t(lang, "upi_assigned", amount=format_rupees(txn.amount_paise), name=c.name,
+                    balance=balance_phrase(c.balance_paise, lang)) + ".",
     }
 
 

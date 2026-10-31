@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.i18n import t
 from app.db.models import (
     Customer,
     EntryType,
@@ -268,7 +269,7 @@ async def _get_balance(ctx: ToolContext, customer: str) -> dict:
         "balance_paise": b["balance_paise"],
         "advance": b["balance_paise"] < 0,
         "next_due_date": b["next_due_date"].isoformat() if b["next_due_date"] else None,
-        "next_due_spoken": spoken_date(b["next_due_date"], ctx.today) if b["next_due_date"] else None,
+        "next_due_spoken": spoken_date(b["next_due_date"], ctx.today, ctx.merchant.language) if b["next_due_date"] else None,
         "next_due_amount": format_rupees(b["next_due_paise"]) if b["next_due_date"] else None,
         "overdue_amount": format_rupees(b["overdue_paise"]) if b["overdue_paise"] else None,
         "last_payment": {"amount": format_rupees(lp.amount_paise),
@@ -348,7 +349,7 @@ async def _create_customer(ctx: ToolContext, name: str, phone: str | None = None
     name = " ".join(name.split())
     if not name:
         raise LedgerError("Naam khaali hai.")
-    summary = f"naya customer {name}" + (f", phone {phone}" if phone else "")
+    summary = t(ctx.merchant.language, "sum_new_customer", name=name) + (f", phone {phone}" if phone else "")
     return await _propose(ctx, "create_customer", {"name": name, "phone": phone, "nickname": nickname}, summary)
 
 
@@ -364,11 +365,12 @@ async def _add_credit(ctx: ToolContext, customer: str, amount_rupees, due: str |
             raise LedgerError(f"Due date '{due}' samajh nahi aayi. Merchant se tareekh poochiye.")
         if due_date < ctx.today:
             raise LedgerError(f"Due date {due_date} beet chuki hai. Merchant se dobara poochiye.")
-    summary = f"{name} ko {format_rupees(paise)} udhaar"
+    lang = ctx.merchant.language
+    summary = t(lang, "sum_credit", name=name, amount=format_rupees(paise))
     if items:
         summary += f" ({items})"
     if due_date:
-        summary += f", {spoken_date(due_date, ctx.today)} tak"
+        summary += t(lang, "sum_due", date=spoken_date(due_date, ctx.today, lang))
     big = paise > ctx.merchant.large_amount_threshold_paise
     args = {"customer_id": r.ref, "amount_paise": paise, "due_date": due_date.isoformat() if due_date else None,
             "items": items, "note": note, "spoken_name": r.spoken_name}
@@ -382,8 +384,9 @@ async def _record_payment(ctx: ToolContext, customer: str, amount_rupees, mode: 
     mode = (mode or "cash").lower()
     if mode not in {"cash", "upi", "other"}:
         raise LedgerError("mode must be cash, upi or other.")
-    mode_word = {"cash": "cash", "upi": "UPI se", "other": ""}[mode]
-    summary = " ".join(f"{name} se {format_rupees(paise)} {mode_word} mile".split())
+    lang = ctx.merchant.language
+    mode_word = t(lang, f"mode_{mode}")
+    summary = " ".join(t(lang, "sum_payment", name=name, amount=format_rupees(paise), mode=mode_word).split())
     big = paise > ctx.merchant.large_amount_threshold_paise
     args = {"customer_id": r.ref, "amount_paise": paise, "mode": mode, "spoken_name": r.spoken_name}
     return await _propose(ctx, "record_payment", args, summary, 2 if big else 1)
@@ -394,7 +397,8 @@ async def _link_upi(ctx: ToolContext, customer: str, vpa: str):
     vpa = vpa.strip().lower().replace(" at ", "@").replace(" ", "")
     if "@" not in vpa:
         raise LedgerError("UPI ID mein @ hona chahiye (jaise naam@ybl). Merchant se dobara poochiye.")
-    return await _propose(ctx, "link_upi", {"customer_id": r.ref, "vpa": vpa}, f"{r.name} ki UPI ID {vpa}")
+    return await _propose(ctx, "link_upi", {"customer_id": r.ref, "vpa": vpa},
+                          t(ctx.merchant.language, "sum_link_upi", name=r.name, vpa=vpa))
 
 
 async def _send_reminder(ctx: ToolContext, customer: str | None = None, all_due: bool | str = False):
@@ -405,14 +409,15 @@ async def _send_reminder(ctx: ToolContext, customer: str | None = None, all_due:
         r = await _resolve_customer(ctx, customer)
         if r.customer is None or r.customer.balance_paise <= 0:
             raise LedgerError(f"{r.name} ka kuch baaki nahi hai.")
-        summary = f"{r.name} ko {format_rupees(r.customer.balance_paise)} ka WhatsApp reminder"
+        summary = t(ctx.merchant.language, "sum_reminder_one", name=r.name,
+                    amount=format_rupees(r.customer.balance_paise))
         return await _propose(ctx, "send_reminder", {"customer_id": r.ref}, summary)
     if all_due:
         rows = await ledger.list_dues(ctx.session, ctx.merchant.id, "today", ctx.today)
         if not rows:
             raise LedgerError("Aaj kisi ka paisa due nahi hai.")
         total = format_rupees(sum(r["due_paise"] for r in rows))
-        summary = f"{len(rows)} customers ko reminder, kul {total}"
+        summary = t(ctx.merchant.language, "sum_reminder_all", n=len(rows), total=total)
         return await _propose(ctx, "send_reminder", {"all_due": True}, summary)
     raise LedgerError("Give customer or all_due=true.")
 
@@ -422,8 +427,9 @@ async def _undo_last(ctx: ToolContext):
     if e is None:
         raise LedgerError("Cancel karne ke liye koi entry nahi hai.")
     c = await ledger.get_customer(ctx.session, ctx.merchant.id, e.customer_id)
-    kind = "udhaar" if e.type == EntryType.CREDIT else "payment"
-    summary = f"pichhli entry cancel: {c.name} ka {format_rupees(e.amount_paise)} {kind}"
+    lang = ctx.merchant.language
+    kind = t(lang, "kind_credit" if e.type == EntryType.CREDIT else "kind_payment")
+    summary = t(lang, "sum_undo", name=c.name, amount=format_rupees(e.amount_paise), kind=kind)
     return await _propose(ctx, "undo_last", {"entry_id": str(e.id)}, summary)
 
 
@@ -433,7 +439,8 @@ async def _assign_upi_payment(ctx: ToolContext, txn_id: str, customer: str):
     txn = (await ctx.session.execute(stmt)).scalar_one_or_none()
     if txn is None:
         raise NotFoundError("Ye payment nahi mila; list_unmatched_payments se txn_id lijiye.")
-    summary = f"{format_rupees(txn.amount_paise)} ({txn.payer_vpa}) {r.name} ke khate mein jama"
+    summary = t(ctx.merchant.language, "sum_assign", amount=format_rupees(txn.amount_paise),
+                vpa=txn.payer_vpa, name=r.name)
     return await _propose(ctx, "assign_upi_payment", {"txn_id": txn_id, "customer_id": r.ref}, summary)
 
 

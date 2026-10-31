@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
-from app.api.schemas import MerchantIn
+from app.api.schemas import MerchantIn, MerchantUpdate
 from app.db.models import Merchant
 from app.ledger import service as ledger
 from app.nlp.hinglish_numbers import format_rupees, rupees_to_paise
@@ -36,3 +36,20 @@ async def create_merchant(body: MerchantIn, session: AsyncSession = Depends(get_
 @router.get("/{merchant_id}")
 async def get_merchant(merchant_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
     return merchant_out(await ledger.get_merchant(session, merchant_id))
+
+
+@router.patch("/{merchant_id}")
+async def update_merchant(merchant_id: uuid.UUID, body: MerchantUpdate, session: AsyncSession = Depends(get_session)):
+    """Change shop settings, e.g. the language the app, voice replies and reminders use."""
+    m = await ledger.get_merchant(session, merchant_id)
+    fields = body.model_dump(exclude_unset=True)
+    if "large_amount_threshold_rupees" in fields:
+        threshold = fields.pop("large_amount_threshold_rupees")
+        if threshold is not None:
+            m.large_amount_threshold_paise = rupees_to_paise(threshold)
+    for key, value in fields.items():
+        if key in ("name", "language") and value is None:
+            continue
+        setattr(m, key, value)
+    await session.commit()
+    return merchant_out(m)

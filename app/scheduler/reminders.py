@@ -6,6 +6,7 @@ from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Customer, Merchant, Reminder, utcnow
+from app.i18n import t
 from app.ledger.errors import LedgerError
 from app.nlp.hinglish_numbers import format_rupees
 from app.payments.upi_links import upi_intent_link
@@ -16,11 +17,10 @@ log = logging.getLogger("khata.reminders")
 
 def reminder_message(merchant: Merchant, customer: Customer, amount_paise: int, link: str,
                      due: date | None = None) -> str:
-    due_txt = f" ({spoken_date(due)} tak)" if due else ""
-    return (
-        f"Namaste {customer.name} ji, {merchant.name} se yaad dila rahe hain: aapka "
-        f"{format_rupees(amount_paise)} baaki hai{due_txt}. Yahan se pay karein: {link}"
-    )
+    lang = merchant.language
+    due_txt = t(lang, "reminder_due", date=spoken_date(due, lang=lang)) if due else ""
+    return t(lang, "reminder_message", customer=customer.name, shop=merchant.name,
+             amount=format_rupees(amount_paise), due=due_txt, link=link)
 
 
 async def send_reminders(
@@ -29,7 +29,7 @@ async def send_reminders(
 ) -> list[Reminder]:
     """targets: (customer, amount to ask for, due date). Caller commits."""
     if not merchant.upi_vpa:
-        raise LedgerError("Reminder ke liye pehle apni UPI ID set kijiye.")
+        raise LedgerError.of("err_reminder_needs_upi")
     sent = []
     for customer, amount, due in targets:
         if amount <= 0:

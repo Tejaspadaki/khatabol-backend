@@ -5,9 +5,10 @@ from datetime import datetime
 from sqlalchemy import select
 
 from app.agent.llm import LLMUnavailable
-from app.agent.orchestrator import LLM_BUSY_REPLY, Orchestrator
+from app.agent.orchestrator import Orchestrator
 from app.config import get_settings
 from app.db.models import LedgerEntry, PendingAction, PendingStatus, VoiceLog
+from app.i18n import t
 from app.ledger import service as ledger
 from tests.conftest import FakeLLM, last_results, text, tool
 
@@ -243,7 +244,7 @@ async def test_rate_limit_gives_busy_reply(session, merchant):
             raise LLMUnavailable("429", rate_limited=True)
 
     r = await Orchestrator(LimitedLLM()).handle_text(session, merchant.id, "Ramesh ka hisaab", "s1", now=NOW)
-    assert r.outcome == "llm_unavailable" and r.reply == LLM_BUSY_REPLY
+    assert r.outcome == "llm_unavailable" and r.reply == t("hi", "llm_busy")
 
 
 async def test_last_payment_date_is_ist(session, merchant):
